@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Coop — Chat UX preview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  /* ---------- design tokens (match farm.html) ---------- */
+  :root {
+    --bg:#0d1410; --panel:#121b16; --panel-2:#162020; --line:#243028;
+    --text:#e6f0ea; --muted:#8aa193; --accent:#6cd081; --accent-2:#9ee5a8;
+    --warn:#ffb060; --danger:#ff6b6b; --info:#7ec8ff;
+    --bubble-user:#1b2a22; --bubble-hen:#15201a;
+    --shadow:0 8px 28px rgba(0,0,0,0.35);
+  }
+  *{ box-sizing:border-box }
+  html,body{ margin:0; height:100%; background:radial-gradient(circle at 30% 0%, #15241b 0%, var(--bg) 60%);
+    color:var(--text); font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,system-ui,sans-serif;
+    overflow:hidden; }
+  button{ font:inherit; color:inherit; cursor:pointer; }
+  code{ font:12px/1.4 ui-monospace,Menlo,monospace; background:rgba(255,255,255,0.06);
+    padding:1px 5px; border-radius:4px; }
+
+  /* ---------- layout ---------- */
+  .app{ display:grid; grid-template-columns:230px 1fr 360px; height:100vh; }
+  aside.flock{ background:var(--panel); border-right:1px solid var(--line);
+    padding:14px 12px; display:flex; flex-direction:column; gap:6px; }
+  aside.flock h2{ font:700 10px/1 sans-serif; letter-spacing:.14em;
+    color:var(--muted); text-transform:uppercase; margin:4px 4px 8px; }
+  .flock-item{ display:flex; align-items:center; gap:10px; padding:8px 10px;
+    border-radius:10px; cursor:pointer; transition:background .2s; }
+  .flock-item:hover{ background:rgba(255,255,255,0.03); }
+  .flock-item.active{ background:rgba(108,208,129,0.12); border:1px solid rgba(108,208,129,0.25); }
+  .flock-item .face{ font-size:18px; line-height:1; }
+  .flock-item .name{ flex:1; font-weight:600; font-size:13px; }
+  .flock-item .st{ font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .flock-item.working .face{ animation:peck 0.6s ease-in-out infinite; transform-origin:60% 80%; }
+  .flock-item.idle .face   { animation:bob 2.4s ease-in-out infinite; }
+  .flock-item.sleeping .face{ animation:breathe 3s ease-in-out infinite; opacity:.55; }
+
+  /* ---------- center: conversation ---------- */
+  main.chan{ display:flex; flex-direction:column; min-width:0; }
+  .chan-head{ display:flex; align-items:center; gap:10px; padding:12px 18px;
+    border-bottom:1px solid var(--line); background:linear-gradient(180deg,#16211a,#101813); }
+  .chan-head .face{ font-size:22px; }
+  .chan-head .name{ font-size:15px; font-weight:700; }
+  .chan-head .sub{ color:var(--muted); font-size:11px; }
+  .chan-head .spacer{ flex:1; }
+  .chan-head .pill{ display:inline-flex; align-items:center; gap:6px;
+    padding:4px 10px; border-radius:999px; font-size:11px; font-weight:600;
+    background:rgba(108,208,129,0.12); color:var(--accent-2);
+    border:1px solid rgba(108,208,129,0.3); }
+  .chan-head .pill .dot{ width:6px; height:6px; border-radius:50%;
+    background:var(--accent-2); box-shadow:0 0 6px var(--accent-2); }
+  .chan-head .pill.working{ background:rgba(255,176,96,0.12);
+    color:var(--warn); border-color:rgba(255,176,96,0.3); }
+  .chan-head .pill.working .dot{ background:var(--warn); box-shadow:0 0 6px var(--warn);
+    animation:pulse 1.2s ease-in-out infinite; }
+
+  .timeline{ flex:1; overflow-y:auto; padding:18px 22px 8px;
+    display:flex; flex-direction:column; gap:14px; scroll-behavior:smooth; }
+  .timeline::-webkit-scrollbar{ width:8px; }
+  .timeline::-webkit-scrollbar-thumb{ background:rgba(255,255,255,0.08); border-radius:4px; }
+
+  .msg{ display:flex; gap:10px; max-width:680px; opacity:0; transform:translateY(8px);
+    animation:msgIn .35s cubic-bezier(.2,.7,.2,1) forwards; }
+  .msg .avatar{ width:32px; height:32px; border-radius:50%; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center; font-size:18px;
+    background:rgba(255,255,255,0.04); border:1px solid var(--line); }
+  .msg.user .avatar{ background:rgba(126,200,255,0.12); border-color:rgba(126,200,255,0.3); }
+  .msg.hen   .avatar{ background:rgba(108,208,129,0.12); border-color:rgba(108,208,129,0.3); }
+  .msg.hen.working .avatar{ animation:peck .6s ease-in-out infinite; transform-origin:60% 80%; }
+  .msg .col{ display:flex; flex-direction:column; gap:4px; min-width:0; flex:1; }
+  .msg .meta{ font-size:11px; color:var(--muted); display:flex; gap:8px; }
+  .msg .meta .who{ font-weight:700; color:var(--text); }
+  .msg .meta .t{ color:var(--muted); }
+  .msg .bubble{ background:var(--bubble-hen); border:1px solid var(--line);
+    border-radius:12px; padding:9px 13px; max-width:560px;
+    white-space:pre-wrap; word-wrap:break-word; }
+  .msg.user .bubble{ background:var(--bubble-user);
+    border-color:rgba(126,200,255,0.2); }
+  .msg.hen.error .bubble{ background:rgba(255,107,107,0.08);
+    border-color:rgba(255,107,107,0.3); }
+
+  /* typing dots */
+  .typing{ display:inline-flex; gap:4px; padding:8px 12px; align-items:center; }
+  .typing .d{ width:6px; height:6px; border-radius:50%; background:var(--accent-2);
+    animation:typing 1.2s ease-in-out infinite; }
+  .typing .d:nth-child(2){ animation-delay:.15s; }
+  .typing .d:nth-child(3){ animation-delay:.3s; }
+  .typing-label{ font-size:11px; color:var(--muted); margin-left:6px; }
+
+  /* plan card */
+  .plan-card{ background:rgba(126,200,255,0.06);
+    border:1px solid rgba(126,200,255,0.25); border-radius:12px;
+    padding:14px 16px; max-width:560px;
+    animation:cardIn .5s cubic-bezier(.2,.7,.2,1); }
+  .plan-card .head{ font-weight:700; margin-bottom:8px; color:var(--info); }
+  .plan-card ol{ margin:0; padding-left:22px; }
+  .plan-card ol li{ margin:4px 0; opacity:0;
+    animation:listIn .35s ease forwards; }
+  .plan-card ol li:nth-child(1){ animation-delay:.1s; }
+  .plan-card ol li:nth-child(2){ animation-delay:.2s; }
+  .plan-card ol li:nth-child(3){ animation-delay:.3s; }
+  .plan-card ol li:nth-child(4){ animation-delay:.4s; }
+  .plan-card ol li:nth-child(5){ animation-delay:.5s; }
+  .plan-card .est{ font-size:11px; color:var(--muted); margin-top:8px; }
+  .plan-card .actions{ display:flex; gap:8px; margin-top:12px; opacity:0;
+    animation:listIn .35s .6s ease forwards; }
+  .plan-card .actions button{ background:rgba(108,208,129,0.16);
+    color:var(--accent-2); border:1px solid rgba(108,208,129,0.3);
+    border-radius:8px; padding:6px 12px; font-weight:600; transition:all .15s; }
+  .plan-card .actions button.alt{ background:transparent; color:var(--muted);
+    border-color:var(--line); }
+  .plan-card .actions button.danger{ background:rgba(255,107,107,0.1);
+    color:var(--danger); border-color:rgba(255,107,107,0.3); }
+  .plan-card .actions button:hover{ transform:translateY(-1px); filter:brightness(1.1); }
+  .plan-card .actions button:active{ transform:translateY(1px); }
+
+  /* summary card */
+  .summary{ background:rgba(108,208,129,0.06);
+    border:1px solid rgba(108,208,129,0.3); border-radius:12px;
+    padding:14px 16px; max-width:560px;
+    animation:cardIn .5s cubic-bezier(.2,.7,.2,1); }
+  .summary .head{ font-weight:700; color:var(--accent-2); margin-bottom:8px;
+    display:flex; align-items:center; gap:6px; }
+  .summary .changes{ font-size:12px; color:var(--muted);
+    background:rgba(0,0,0,0.2); padding:6px 10px; border-radius:6px;
+    margin:8px 0; font-family:ui-monospace,monospace; }
+  .summary .reactions{ display:flex; gap:6px; margin-top:10px; }
+  .summary .reactions button{ background:rgba(255,255,255,0.04);
+    border:1px solid var(--line); border-radius:999px; padding:4px 10px;
+    font-size:14px; transition:all .15s; }
+  .summary .reactions button:hover{ transform:scale(1.15) rotate(-6deg); background:rgba(108,208,129,0.15); }
+  .summary .reactions button.popped{ animation:pop .4s ease; }
+
+  /* queued banner */
+  .queued{ background:rgba(255,176,96,0.08);
+    border:1px solid rgba(255,176,96,0.3); border-radius:8px;
+    padding:6px 12px; font-size:12px; color:var(--warn);
+    display:inline-flex; align-items:center; gap:8px; align-self:flex-start;
+    animation:msgIn .3s ease; }
+
+  /* ---------- composer ---------- */
+  .composer-wrap{ padding:12px 22px 18px; border-top:1px solid var(--line);
+    background:linear-gradient(180deg,transparent,rgba(0,0,0,0.2)); }
+  .composer{ background:var(--panel-2); border:1px solid var(--line);
+    border-radius:14px; padding:8px 8px 8px 12px; box-shadow:var(--shadow);
+    transition:border-color .2s; position:relative; }
+  .composer:focus-within{ border-color:rgba(108,208,129,0.4);
+    box-shadow:0 0 0 3px rgba(108,208,129,0.08); }
+  .composer textarea{ width:100%; background:transparent; color:var(--text);
+    border:0; outline:0; resize:none; font:inherit; min-height:22px; max-height:160px;
+    padding:6px 0; }
+  .composer textarea::placeholder{ color:var(--muted); }
+  .composer-row{ display:flex; align-items:center; gap:6px; margin-top:4px; }
+  .chip{ display:inline-flex; align-items:center; gap:5px;
+    background:rgba(255,255,255,0.03); border:1px solid var(--line);
+    border-radius:999px; padding:3px 10px; font-size:11px; cursor:pointer;
+    color:var(--muted); transition:all .15s; }
+  .chip:hover{ background:rgba(255,255,255,0.07); color:var(--text); }
+  .chip.active{ background:rgba(108,208,129,0.14); color:var(--accent-2);
+    border-color:rgba(108,208,129,0.3); }
+  .composer-row .spacer{ flex:1; }
+  .send-btn{ background:var(--accent); color:#0d1410; border:0;
+    border-radius:10px; padding:6px 14px; font-weight:700; transition:all .15s; }
+  .send-btn:hover{ filter:brightness(1.08); transform:translateY(-1px); }
+  .send-btn:active{ transform:translateY(1px); }
+  .send-btn.send-flash{ animation:sendFlash .5s ease; }
+
+  /* slash menu */
+  .slash-menu{ position:absolute; bottom:calc(100% + 6px); left:6px; right:6px;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:12px;
+    padding:6px; box-shadow:var(--shadow); display:none;
+    max-height:240px; overflow-y:auto; }
+  .slash-menu.open{ display:block; animation:cardIn .2s ease; }
+  .slash-item{ display:flex; align-items:center; gap:10px; padding:7px 10px;
+    border-radius:8px; cursor:pointer; }
+  .slash-item:hover, .slash-item.sel{ background:rgba(108,208,129,0.12); }
+  .slash-item .cmd{ font-family:ui-monospace,monospace; color:var(--accent-2);
+    font-weight:700; min-width:90px; font-size:12px; }
+  .slash-item .desc{ color:var(--muted); font-size:12px; }
+
+  /* hint line */
+  .hint{ font-size:11px; color:var(--muted); margin:6px 4px 0;
+    display:flex; align-items:center; gap:8px; }
+  .hint .dot{ width:6px; height:6px; border-radius:50%;
+    background:var(--accent-2); box-shadow:0 0 6px var(--accent-2); }
+
+  /* ---------- right: job thread ---------- */
+  aside.thread{ background:var(--panel); border-left:1px solid var(--line);
+    overflow-y:auto; }
+  .thread-head{ padding:12px 16px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:10px; }
+  .thread-head .title{ font-weight:700; font-size:13px; }
+  .thread-head .sub{ font-size:11px; color:var(--muted); }
+  .thread-empty{ padding:40px 20px; text-align:center; color:var(--muted); }
+  .thread-empty .big{ font-size:44px; margin-bottom:8px; opacity:.5; }
+  .thread-body{ padding:14px 16px; display:flex; flex-direction:column; gap:8px; }
+
+  .step{ display:grid; grid-template-columns:22px 22px 1fr auto;
+    gap:8px; padding:8px 10px; border-radius:8px;
+    background:rgba(255,255,255,0.02); border:1px solid var(--line);
+    align-items:center; opacity:0; transform:translateX(8px);
+    animation:stepIn .3s ease forwards; }
+  .step .n{ font-size:10px; color:var(--muted); text-align:center; }
+  .step .ic{ font-size:14px; text-align:center; }
+  .step .lbl{ font-size:12px; min-width:0; overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap; }
+  .step .lbl code{ font-size:11px; padding:0 4px; }
+  .step .ms{ font-size:10px; color:var(--muted); font-family:ui-monospace,monospace; }
+  .step.done{ background:rgba(108,208,129,0.05); }
+  .step.done .n::before{ content:"✓"; color:var(--accent-2); font-weight:700; font-size:12px; }
+  .step.done .n{ font-size:0; }
+  .step.run{ background:rgba(255,176,96,0.06); border-color:rgba(255,176,96,0.25); }
+  .step.run .n::before{ content:""; display:inline-block; width:10px; height:10px;
+    border-radius:50%; border:2px solid var(--warn); border-top-color:transparent;
+    animation:spin .8s linear infinite; vertical-align:middle; }
+  .step.run .n{ font-size:0; }
+  .step.todo{ opacity:.45; }
+  .step.todo .n{ font-size:11px; color:var(--muted); }
+
+  .live-output{ margin-top:6px; background:#000; border-radius:6px;
+    padding:8px 10px; font:11px/1.4 ui-monospace,monospace;
+    color:#9ee5a8; min-height:40px; max-height:120px; overflow:hidden;
+    border:1px solid var(--line); position:relative; }
+  .live-output .cursor{ display:inline-block; width:7px; height:11px;
+    background:var(--accent); margin-left:1px; vertical-align:middle;
+    animation:blink 1s steps(2) infinite; }
+  .progress-bar{ height:4px; background:rgba(255,255,255,0.06);
+    border-radius:2px; overflow:hidden; margin-top:6px; }
+  .progress-bar .fill{ height:100%; background:linear-gradient(90deg,var(--accent),var(--accent-2));
+    width:0%; transition:width .4s ease; }
+
+  .stats{ display:flex; gap:14px; padding:10px 12px; margin-top:8px;
+    background:rgba(0,0,0,0.2); border-radius:8px; font-size:11px; color:var(--muted); }
+  .stats b{ color:var(--text); font-family:ui-monospace,monospace; font-weight:600; display:block; }
+
+  .thread-actions{ display:flex; gap:6px; margin-top:12px; }
+  .thread-actions button{ flex:1; background:transparent; border:1px solid var(--line);
+    border-radius:8px; padding:6px 10px; color:var(--muted); font-size:11px;
+    font-weight:600; transition:all .15s; }
+  .thread-actions button:hover{ background:rgba(255,255,255,0.04); color:var(--text); }
+  .thread-actions button.danger:hover{ background:rgba(255,107,107,0.1);
+    color:var(--danger); border-color:rgba(255,107,107,0.3); }
+
+  /* demo bar */
+  .demo-bar{ position:fixed; top:10px; right:10px; z-index:50;
+    background:rgba(0,0,0,0.6); backdrop-filter:blur(8px);
+    border:1px solid var(--line); border-radius:999px;
+    padding:6px 8px; display:flex; gap:6px; align-items:center; font-size:12px; }
+  .demo-bar button{ background:var(--accent); color:#0d1410; border:0;
+    border-radius:999px; padding:5px 12px; font-weight:700; }
+  .demo-bar button.alt{ background:transparent; color:var(--muted);
+    border:1px solid var(--line); }
+  .demo-bar .badge{ color:var(--muted); padding:0 6px; }
+
+  /* ---------- keyframes ---------- */
+  @keyframes msgIn{ to{ opacity:1; transform:translateY(0); } }
+  @keyframes cardIn{ from{ opacity:0; transform:translateY(10px) scale(.98); }
+    to{ opacity:1; transform:translateY(0) scale(1); } }
+  @keyframes listIn{ to{ opacity:1; } }
+  @keyframes stepIn{ to{ opacity:1; transform:translateX(0); } }
+  @keyframes typing{ 0%,80%,100%{ opacity:.3; transform:translateY(0); }
+    40%{ opacity:1; transform:translateY(-3px); } }
+  @keyframes peck{ 0%,100%{ transform:rotate(0deg) translateY(0); }
+    40%{ transform:rotate(-22deg) translateY(2px); }
+    60%{ transform:rotate(-28deg) translateY(3px); } }
+  @keyframes bob{ 0%,100%{ transform:translateY(0); }
+    50%{ transform:translateY(-3px); } }
+  @keyframes breathe{ 0%,100%{ transform:scale(1); opacity:.55; }
+    50%{ transform:scale(1.05); opacity:.75; } }
+  @keyframes pulse{ 0%,100%{ box-shadow:0 0 6px var(--warn); }
+    50%{ box-shadow:0 0 14px var(--warn), 0 0 4px var(--warn); } }
+  @keyframes blink{ 50%{ opacity:0; } }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  @keyframes pop{ 0%{ transform:scale(1); }
+    40%{ transform:scale(1.5) rotate(15deg); }
+    100%{ transform:scale(1); } }
+  @keyframes sendFlash{ 0%{ background:var(--accent); }
+    40%{ background:#fff; box-shadow:0 0 24px var(--accent-2); }
+    100%{ background:var(--accent); } }
+  @keyframes shake{ 0%,100%{ transform:translateX(0); }
+    20%,60%{ transform:translateX(-3px); }
+    40%,80%{ transform:translateX(3px); } }
+  .shake{ animation:shake .4s ease; }
+</style>
+</head>
+<body>
+
+<div class="demo-bar">
+  <span class="badge">Coop chat demo</span>
+  <button id="btn-play">▶ Play full flow</button>
+  <button id="btn-reset" class="alt">↻ reset</button>
+</div>
+
+<div class="app">
+  <!-- LEFT: flock -->
+  <aside class="flock">
+    <h2>🐔 The flock</h2>
+    <div class="flock-item idle active"  data-name="aria">
+      <span class="face">🐔</span>
+      <div style="flex:1;min-width:0">
+        <div class="name">aria</div>
+        <div class="st">idle</div>
+      </div>
+    </div>
+    <div class="flock-item working" data-name="scout">
+      <span class="face">🐓</span>
+      <div style="flex:1;min-width:0">
+        <div class="name">scout</div>
+        <div class="st">working</div>
+      </div>
+    </div>
+    <div class="flock-item sleeping" data-name="builder">
+      <span class="face">🐔</span>
+      <div style="flex:1;min-width:0">
+        <div class="name">builder</div>
+        <div class="st">sleeping</div>
+      </div>
+    </div>
+    <div style="flex:1"></div>
+    <button class="chip" style="justify-content:center; padding:7px;">🥚 Raise new chicken</button>
+  </aside>
+
+  <!-- CENTER: channel -->
+  <main class="chan">
+    <div class="chan-head">
+      <span class="face" id="chan-face">🐔</span>
+      <div>
+        <div class="name">#aria</div>
+        <div class="sub">Hen · brain: claude-sonnet-4.5</div>
+      </div>
+      <span class="spacer"></span>
+      <span class="pill" id="chan-pill"><span class="dot"></span><span id="chan-pill-text">idle</span></span>
+    </div>
+
+    <div class="timeline" id="timeline">
+      <!-- messages will be injected here -->
+      <div class="msg hen" style="animation-delay:.1s">
+        <div class="avatar">🐔</div>
+        <div class="col">
+          <div class="meta"><span class="who">aria</span><span class="t">9:42 AM</span></div>
+          <div class="bubble">Morning! Ready when you are. Tap <code>/</code> in the composer for commands, or just tell me what to build.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="composer-wrap">
+      <div class="composer" id="composer">
+        <div class="slash-menu" id="slash-menu">
+          <div class="slash-item sel"><span class="cmd">/plan</span><span class="desc">Plan first, then execute (recommended)</span></div>
+          <div class="slash-item"><span class="cmd">/do</span><span class="desc">Just do it</span></div>
+          <div class="slash-item"><span class="cmd">/ask</span><span class="desc">Only answer, don't touch files</span></div>
+          <div class="slash-item"><span class="cmd">/dryrun</span><span class="desc">Simulate writes as diffs</span></div>
+          <div class="slash-item"><span class="cmd">/sleep</span><span class="desc">Send chicken to sleep</span></div>
+          <div class="slash-item"><span class="cmd">/clear</span><span class="desc">Clear conversation context</span></div>
+        </div>
+        <textarea id="ta" rows="1" placeholder="tell aria what to do…"></textarea>
+        <div class="composer-row">
+          <button class="chip" title="Attach file">📎</button>
+          <button class="chip active" data-mode="plan">🎯 Plan-first</button>
+          <button class="chip" data-mode="do">⚡ Just do it</button>
+          <button class="chip" data-mode="dry">🔒 Dry-run</button>
+          <button class="chip" data-mode="ask">🤝 Ask first</button>
+          <span class="spacer"></span>
+          <span style="font-size:11px;color:var(--muted)">⌘↩ to send</span>
+          <button class="send-btn" id="btn-send">Send</button>
+        </div>
+      </div>
+      <div class="hint"><span class="dot"></span> aria is idle · 4 tools available · workdir 23 files</div>
+    </div>
+  </main>
+
+  <!-- RIGHT: job thread -->
+  <aside class="thread" id="thread">
+    <div class="thread-head">
+      <span class="title">▶ Job thread</span>
+      <span class="sub" id="thread-sub">no active job</span>
+    </div>
+    <div class="thread-empty" id="thread-empty">
+      <div class="big">🪺</div>
+      <div>Nothing pecking right now.</div>
+      <div style="font-size:11px;margin-top:6px">Send a message to start a job.</div>
+    </div>
+    <div class="thread-body" id="thread-body" hidden></div>
+  </aside>
+</div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const tl = $('timeline');
+  const ta = $('ta');
+  const slash = $('slash-menu');
+
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const now = () => new Date().toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+
+  // --- composer: autosize ---
+  ta.addEventListener('input', () => {
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
+    slash.classList.toggle('open', ta.value.startsWith('/'));
+  });
+  ta.addEventListener('keydown', e => {
+    if (e.key === 'Escape') slash.classList.remove('open');
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(); }
+  });
+  document.querySelectorAll('.slash-item').forEach(it => {
+    it.onclick = () => {
+      ta.value = it.querySelector('.cmd').textContent + ' ';
+      slash.classList.remove('open'); ta.focus();
+    };
+  });
+  document.querySelectorAll('.chip[data-mode]').forEach(c => {
+    c.onclick = () => {
+      document.querySelectorAll('.chip[data-mode]').forEach(x => x.classList.remove('active'));
+      c.classList.add('active');
+    };
+  });
+
+  // --- timeline append helpers ---
+  function addUser(text){
+    const m = document.createElement('div');
+    m.className = 'msg user';
+    m.innerHTML = `
+      <div class="avatar">🧑</div>
+      <div class="col">
+        <div class="meta"><span class="who">you</span><span class="t">${now()}</span></div>
+        <div class="bubble">${escape(text)}</div>
+      </div>`;
+    tl.appendChild(m); scroll();
+    return m;
+  }
+  function addHen({text, html, kind, working}){
+    const m = document.createElement('div');
+    m.className = 'msg hen' + (working ? ' working' : '') + (kind === 'error' ? ' error' : '');
+    m.innerHTML = `
+      <div class="avatar">🐔</div>
+      <div class="col">
+        <div class="meta"><span class="who">aria</span><span class="t">${now()}</span></div>
+        ${html ? html : `<div class="bubble">${text || ''}</div>`}
+      </div>`;
+    tl.appendChild(m); scroll();
+    return m;
+  }
+  function addTyping(label='thinking…'){
+    const m = document.createElement('div');
+    m.className = 'msg hen working';
+    m.dataset.typing = '1';
+    m.innerHTML = `
+      <div class="avatar">🐔</div>
+      <div class="col">
+        <div class="typing">
+          <span class="d"></span><span class="d"></span><span class="d"></span>
+          <span class="typing-label">${label}</span>
+        </div>
+      </div>`;
+    tl.appendChild(m); scroll(); return m;
+  }
+  function addQueued(text){
+    const q = document.createElement('div');
+    q.className = 'queued';
+    q.innerHTML = `📥 ${escape(text)} <button class="chip" style="padding:1px 8px;font-size:11px">cancel & run now</button>`;
+    tl.appendChild(q); scroll(); return q;
+  }
+  function escape(s){ return String(s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function scroll(){ tl.scrollTop = tl.scrollHeight; }
+
+  // --- pill / channel state ---
+  function setState(s, label){
+    const pill = $('chan-pill');
+    pill.className = 'pill ' + (s === 'working' ? 'working' : '');
+    $('chan-pill-text').textContent = label || s;
+    const fi = document.querySelector('.flock-item.active');
+    if (fi){
+      fi.classList.remove('idle','working','sleeping');
+      fi.classList.add(s === 'working' ? 'working' : 'idle');
+      fi.querySelector('.st').textContent = label || s;
+    }
+  }
+
+  // --- thread / steps ---
+  function threadStart(title){
+    $('thread-empty').hidden = true;
+    const tb = $('thread-body'); tb.hidden = false; tb.innerHTML = '';
+    $('thread-sub').textContent = title;
+    return tb;
+  }
+  function addStep(tb, n, icon, label){
+    const s = document.createElement('div');
+    s.className = 'step todo';
+    s.innerHTML = `<span class="n">${n}</span><span class="ic">${icon}</span>
+      <span class="lbl">${label}</span><span class="ms"></span>`;
+    tb.appendChild(s); return s;
+  }
+  function markRun(step){ step.classList.remove('todo'); step.classList.add('run'); }
+  function markDone(step, ms){
+    step.classList.remove('run','todo'); step.classList.add('done');
+    step.querySelector('.ms').textContent = ms + 's';
+  }
+
+  // --- send (manual) ---
+  $('btn-send').onclick = send;
+  function send(){
+    const t = ta.value.trim(); if (!t) return;
+    $('btn-send').classList.add('send-flash');
+    setTimeout(()=>$('btn-send').classList.remove('send-flash'), 500);
+    addUser(t.replace(/^\/\w+\s*/, ''));
+    ta.value = ''; ta.style.height = 'auto'; slash.classList.remove('open');
+    runFlow(t);
+  }
+
+  // --- the "full flow" demo ---
+  async function runFlow(promptText){
+    // Phase A: typing
+    const typ = addTyping('thinking…');
+    setState('working', 'pecking…');
+    await sleep(1200);
+    typ.remove();
+
+    // Phase B: plan card
+    const plan = addHen({ html: `
+      <div class="plan-card">
+        <div class="head">🎯 Here's my plan</div>
+        <ol>
+          <li>Read <code>src/auth.rs</code> to understand the current API</li>
+          <li>Write a failing test in <code>src/auth/tests.rs</code></li>
+          <li>Replace diesel calls with sqlx</li>
+          <li>Add migration <code>migrations/2026_auth_sqlx.sql</code></li>
+          <li>Run <code>cargo test</code> + <code>cargo clippy</code></li>
+        </ol>
+        <div class="est">≈ 8 tool calls · 3-5 min · ~30k tokens</div>
+        <div class="actions">
+          <button id="plan-approve">✓ Approve & run</button>
+          <button class="alt">✏ Edit plan</button>
+          <button class="danger">✗ Abort</button>
+        </div>
+      </div>` });
+    await sleep(900);
+    plan.querySelector('#plan-approve').click();
+    plan.querySelector('#plan-approve').onclick = null;
+
+    // Phase C: executing → fill the thread
+    const tb = threadStart('Job 7f2a · auth refactor');
+    const steps = [
+      ['1', '📖', 'read src/auth.rs',                     400],
+      ['2', '✏',  'write src/auth/tests.rs (67 lines)',  600],
+      ['3', '🔧', 'cargo test (expected failure)',       2100],
+      ['4', '✏',  'edit src/auth.rs (43 lines)',         1200],
+      ['5', '🔧', 'cargo test',                           2400],
+    ];
+    const stepEls = steps.map(s => addStep(tb, s[0], s[1], s[2]));
+
+    // live output panel
+    const live = document.createElement('div');
+    live.className = 'live-output';
+    live.innerHTML = '<span id="live-text"></span><span class="cursor"></span>';
+    tb.appendChild(live);
+    const lt = live.querySelector('#live-text');
+
+    // progress bar
+    const prog = document.createElement('div');
+    prog.className = 'progress-bar';
+    prog.innerHTML = '<div class="fill" id="prog-fill"></div>';
+    tb.appendChild(prog);
+
+    // stats
+    const stats = document.createElement('div');
+    stats.className = 'stats';
+    stats.innerHTML = `
+      <div><b id="st-step">0/5</b>step</div>
+      <div><b id="st-tok">0</b>tokens</div>
+      <div><b id="st-cost">$0.00</b>cost</div>
+      <div><b id="st-time">0:00</b>elapsed</div>`;
+    tb.appendChild(stats);
+
+    const actions = document.createElement('div');
+    actions.className = 'thread-actions';
+    actions.innerHTML = `
+      <button>⏸ pause</button>
+      <button class="danger">⛔ stop</button>
+      <button>👀 watch shell</button>`;
+    tb.appendChild(actions);
+
+    const t0 = Date.now();
+    const ticker = setInterval(() => {
+      const s = Math.floor((Date.now() - t0) / 1000);
+      $('st-time').textContent = `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
+    }, 500);
+
+    let tokens = 0, idx = 0;
+    for (const [el, [, ic, lbl, ms]] of zip(stepEls, steps)){
+      idx++;
+      markRun(el);
+      $('st-step').textContent = `${idx}/${steps.length}`;
+      // type into live output
+      const sample = sampleOutput(lbl);
+      await typeInto(lt, sample, ms);
+      tokens += Math.floor(800 + Math.random()*1500);
+      $('st-tok').textContent = tokens.toLocaleString();
+      $('st-cost').textContent = '$' + (tokens * 0.000004).toFixed(2);
+      $('prog-fill').style.width = (idx / steps.length * 100) + '%';
+      markDone(el, (ms/1000).toFixed(1));
+    }
+    clearInterval(ticker);
+    live.querySelector('.cursor').remove();
+
+    // Phase D: summary
+    setState('idle', 'idle 😴');
+    $('thread-sub').textContent = '✓ done · 5 steps · 0:47';
+
+    addHen({ html: `
+      <div class="summary">
+        <div class="head">✓ Migrated auth to sqlx</div>
+        <div>Changes:</div>
+        <div class="changes">
+          src/auth.rs              | 43 +++++++-----<br>
+          src/auth/tests.rs        | 67 ++++++++++++++<br>
+          migrations/2026_…sql     | 12 ++++<br>
+          <span style="color:var(--accent-2)">3 files · +110 / -16</span>
+        </div>
+        <div>All tests pass. Clippy clean.</div>
+        <div class="reactions">
+          <button data-r="🥚">🥚</button>
+          <button data-r="🌽">🌽</button>
+          <button data-r="🪵">🪵</button>
+          <button class="chip" style="margin-left:auto">📋 see diff</button>
+          <button class="chip">🔄 revert</button>
+        </div>
+      </div>` });
+
+    document.querySelectorAll('.summary .reactions button[data-r]').forEach(b => {
+      b.onclick = () => { b.classList.add('popped');
+        setTimeout(()=>b.classList.remove('popped'), 400); };
+    });
+  }
+
+  function zip(a, b){ return a.map((x,i) => [x, b[i]]); }
+  function sampleOutput(lbl){
+    if (lbl.includes('read')) return 'reading src/auth.rs (1.2 KB, 47 lines)...\nfound 3 diesel imports, 8 query calls\n';
+    if (lbl.includes('write src/auth/tests')) return 'writing src/auth/tests.rs\n#[test] fn login_with_valid_password() {...\n#[test] fn logout_invalidates_token() {...\nwrote 67 lines\n';
+    if (lbl.includes('cargo test (expected')) return '   Compiling coopd v0.1.0\nrunning 12 tests\ntest auth::tests::login_with_valid_password ... FAILED (expected)\n';
+    if (lbl.includes('edit src/auth.rs')) return 'patching src/auth.rs\n- use diesel::prelude::*;\n+ use sqlx::PgPool;\n... 43 lines changed\n';
+    if (lbl.includes('cargo test') && !lbl.includes('expected')) return '   Compiling coopd v0.1.0\nrunning 12 tests\ntest result: ok. 12 passed; 0 failed\n   Finished in 2.1s\n';
+    return 'working...\n';
+  }
+  async function typeInto(el, str, totalMs){
+    const chunks = str.split(/(?<=[\n,. ])/);
+    const per = Math.max(20, totalMs / chunks.length);
+    for (const ch of chunks){
+      el.textContent += ch;
+      el.parentElement.scrollTop = el.parentElement.scrollHeight;
+      await sleep(per);
+    }
+  }
+
+  // --- demo buttons ---
+  $('btn-play').onclick = () => {
+    ta.value = '/plan refactor src/auth.rs to use sqlx instead of diesel';
+    ta.dispatchEvent(new Event('input'));
+    setTimeout(send, 600);
+  };
+  $('btn-reset').onclick = () => location.reload();
+
+  // pre-typed sample (subtle): focus + small starter
+  setTimeout(() => ta.focus(), 200);
+</script>
+</body>
+</html>

@@ -1,0 +1,255 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag/name to use for the artifacts (e.g. v0.1.0-dev)"
+        required: true
+        default: "v0.0.0-dev"
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Raspberry Pi 3/4/5 (64-bit Raspberry Pi OS, Ubuntu arm64)
+          - name: linux-aarch64 (Raspberry Pi 64-bit)
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            cross: true
+            archive: tar.gz
+          # Older 32-bit Raspberry Pi OS (Pi Zero 2, legacy Pi 3/4 installs)
+          - name: linux-armv7 (Raspberry Pi 32-bit)
+            os: ubuntu-latest
+            target: armv7-unknown-linux-gnueabihf
+            cross: true
+            archive: tar.gz
+          # Generic Linux x86_64 (servers, dev boxes)
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            cross: false
+            archive: tar.gz
+          # Windows
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            cross: false
+            archive: zip
+          # macOS Apple Silicon
+          - name: macos-aarch64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            cross: false
+            archive: tar.gz
+          # macOS Intel
+          - name: macos-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            cross: false
+            archive: tar.gz
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@1.91.1
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --locked --version 0.2.5
+
+      - name: Build (cargo)
+        if: ${{ !matrix.cross }}
+        shell: bash
+        run: |
+          cargo build --release --target ${{ matrix.target }} \
+            --bin coopd --bin coop
+
+      - name: Build (cross, for Raspberry Pi)
+        if: matrix.cross
+        run: |
+          cross build --release --target ${{ matrix.target }} \
+            --bin coopd --bin coop
+
+      - name: Determine version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stage artifacts
+        id: stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="coop-${{ steps.ver.outputs.tag }}-${{ matrix.target }}"
+          mkdir -p "$stage"
+          ext=""
+          if [[ "${{ matrix.target }}" == *windows* ]]; then ext=".exe"; fi
+          cp "target/${{ matrix.target }}/release/coopd${ext}" "$stage/"
+          cp "target/${{ matrix.target }}/release/coop${ext}"  "$stage/"
+          cp README.md LICENSE CHANGELOG.md "$stage/" 2>/dev/null || true
+          echo "stage=$stage" >> "$GITHUB_OUTPUT"
+
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          tar -C "${{ steps.stage.outputs.stage }}/.." \
+              -czf "${{ steps.stage.outputs.stage }}.tar.gz" \
+              "$(basename ${{ steps.stage.outputs.stage }})"
+          ( cd "$(dirname ${{ steps.stage.outputs.stage }}.tar.gz)" && \
+            shasum -a 256 "$(basename ${{ steps.stage.outputs.stage }}).tar.gz" \
+              > "$(basename ${{ steps.stage.outputs.stage }}).tar.gz.sha256" )
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "${{ steps.stage.outputs.stage }}/*" `
+                           -DestinationPath "${{ steps.stage.outputs.stage }}.zip"
+          $h = (Get-FileHash -Algorithm SHA256 "${{ steps.stage.outputs.stage }}.zip").Hash.ToLower()
+          "$h  ${{ steps.stage.outputs.stage }}.zip" | Out-File -Encoding ascii "${{ steps.stage.outputs.stage }}.zip.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ steps.stage.outputs.stage }}
+          path: |
+            ${{ steps.stage.outputs.stage }}.tar.gz
+            ${{ steps.stage.outputs.stage }}.tar.gz.sha256
+            ${{ steps.stage.outputs.stage }}.zip
+            ${{ steps.stage.outputs.stage }}.zip.sha256
+          if-no-files-found: ignore
+
+  macos-universal:
+    name: macos-universal2 (Intel + Apple Silicon)
+    needs: build
+    runs-on: macos-latest
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Determine version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download Apple Silicon build
+        uses: actions/download-artifact@v5
+        with:
+          name: coop-${{ steps.ver.outputs.tag }}-aarch64-apple-darwin
+          path: arm64
+
+      - name: Download Intel build
+        uses: actions/download-artifact@v5
+        with:
+          name: coop-${{ steps.ver.outputs.tag }}-x86_64-apple-darwin
+          path: x86
+
+      - name: Lipo into universal2 binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.ver.outputs.tag }}"
+          tar -xzf "arm64/coop-${tag}-aarch64-apple-darwin.tar.gz" -C arm64
+          tar -xzf "x86/coop-${tag}-x86_64-apple-darwin.tar.gz"   -C x86
+          stage="coop-${tag}-universal-apple-darwin"
+          mkdir -p "$stage"
+          for bin in coopd coop; do
+            lipo -create -output "$stage/$bin" \
+              "arm64/coop-${tag}-aarch64-apple-darwin/$bin" \
+              "x86/coop-${tag}-x86_64-apple-darwin/$bin"
+            chmod +x "$stage/$bin"
+          done
+          cp README.md LICENSE CHANGELOG.md "$stage/" 2>/dev/null || true
+          tar -czf "$stage.tar.gz" "$stage"
+          shasum -a 256 "$stage.tar.gz" > "$stage.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: coop-${{ steps.ver.outputs.tag }}-universal-apple-darwin
+          path: |
+            coop-${{ steps.ver.outputs.tag }}-universal-apple-darwin.tar.gz
+            coop-${{ steps.ver.outputs.tag }}-universal-apple-darwin.tar.gz.sha256
+
+  publish:
+    name: publish github release
+    needs: [build, macos-universal]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+      - name: Flatten artifacts
+        run: |
+          mkdir -p out
+          find dist -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" \) \
+            -exec cp {} out/ \;
+          ls -la out/
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            ## Coop ${{ github.ref_name }}
+
+            Binaries for the **`coopd`** daemon and **`coop`** CLI.
+
+            | Platform | Asset |
+            |---|---|
+            | 🍓 Raspberry Pi 3/4/5 (64-bit Pi OS, Ubuntu arm64) | `coop-*-aarch64-unknown-linux-gnu.tar.gz` |
+            | 🍓 Raspberry Pi Zero 2 / 32-bit Pi OS | `coop-*-armv7-unknown-linux-gnueabihf.tar.gz` |
+            | 🐧 Linux x86_64 | `coop-*-x86_64-unknown-linux-gnu.tar.gz` |
+            | 🪟 Windows x86_64 | `coop-*-x86_64-pc-windows-msvc.zip` |
+            | 🍎 macOS Apple Silicon | `coop-*-aarch64-apple-darwin.tar.gz` |
+            | 🍎 macOS Intel | `coop-*-x86_64-apple-darwin.tar.gz` |
+            | 🍎 macOS Universal (Intel + Apple Silicon) | `coop-*-universal-apple-darwin.tar.gz` |
+
+            SHA-256 checksums alongside each asset (`*.sha256`).
+
+            ### Quick start (Linux / macOS / Raspberry Pi)
+            ```bash
+            tar -xzf coop-*.tar.gz
+            cd coop-*/
+            ./coopd --help
+            ./coop  --help
+            ```
+
+            ### Quick start (Windows)
+            ```powershell
+            Expand-Archive coop-*-x86_64-pc-windows-msvc.zip
+            cd coop-*\
+            .\coopd.exe --help
+            ```

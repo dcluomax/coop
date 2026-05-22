@@ -1,0 +1,79 @@
+# cargo-deny configuration — encodes Coop's open-core license policy.
+#
+# This repo is Apache-2.0. Every dependency must be Apache-2.0 compatible.
+# Strong copyleft (GPL/LGPL/AGPL/MPL/SSPL/EPL) is rejected to keep the open
+# core safe to embed in proprietary deployments (e.g. coop-market sibling).
+#
+# Per Max's methodology: "taste is encoded, not described."
+# If you want to add a dep with a license not on this allowlist, update this
+# file *and* DECISIONS.md with justification.
+
+[graph]
+all-features = false
+no-default-features = false
+
+[licenses]
+# `confidence-threshold` defaults to 0.8; raise to require near-exact matches.
+confidence-threshold = 0.93
+# Permissive licenses only. Any addition needs a written decision in
+# DECISIONS.md. Order roughly matches frequency in our dep tree.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+]
+# r-efi is "Apache-2.0 OR LGPL-2.1-or-later OR MIT" — picking the MIT/Apache
+# branch is fine. cargo-deny resolves OR expressions against `allow` above,
+# so no explicit exception is needed.
+
+[[licenses.clarify]]
+# `ring` ships "ISC AND OpenSSL"-style notices but the SPDX is "Apache-2.0 AND ISC";
+# upstream confirmed Apache-2.0 + ISC compliance is sufficient.
+name = "ring"
+expression = "Apache-2.0 AND ISC"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+
+[advisories]
+yanked = "warn"
+# All four advisories below are in `rustls-webpki 0.102.8`, pulled in
+# transitively from `serenity 0.12.5 → tokio-tungstenite 0.21 → rustls 0.22`.
+# Serenity 0.12.5 is the latest crates.io release and pins these old TLS
+# crates; serenity 0.13 (with rustls 0.23) is not yet published.
+#
+# Impact assessment (Coop):
+# - rustls-webpki is only on the path that validates Discord's TLS cert
+#   when the optional Discord connector is enabled. It is not in the path
+#   for the Anthropic API (that uses reqwest → rustls 0.23 → webpki 0.103).
+# - The Discord endpoint is a well-known, pinned hostname behind a public
+#   CA; exploitation requires a malicious CA-signed cert or hostile CRL.
+# - Operators can disable the Discord supervisor in config to remove the
+#   attack surface entirely.
+#
+# Tracked for cleanup once serenity 0.13 (or a maintained fork) ships.
+ignore = [
+    "RUSTSEC-2026-0049", # rustls-webpki CRL Distribution Point matching
+    "RUSTSEC-2026-0098", # rustls-webpki URI name-constraint check
+    "RUSTSEC-2026-0099", # rustls-webpki wildcard name-constraint check
+    "RUSTSEC-2026-0104", # rustls-webpki panic on malformed CRL
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

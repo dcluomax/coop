@@ -1,0 +1,22 @@
+[package]
+name = "coopd-discord"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Optional Discord connector for the Coop daemon (channel-per-chicken bot)."
+publish = false
+
+[dependencies]
+coopd-core = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "model", "rustls_backend"] }
+
+[lints]
+workspace = true

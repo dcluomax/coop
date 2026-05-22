@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>coopd · sign in</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: #0b0d10; color: #e6e6e6;
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", Segoe UI, sans-serif;
+  }
+  .card {
+    background: #14181d; border: 1px solid #2a2f36; border-radius: 10px;
+    padding: 28px 32px; width: min(360px, 92vw);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+  p.sub { margin: 0 0 18px; color: #8a929c; font-size: 13px; }
+  label { display: block; font-size: 12px; color: #8a929c; margin-bottom: 6px; }
+  input[type=password] {
+    width: 100%; box-sizing: border-box; padding: 10px 12px;
+    background: #0b0d10; color: #e6e6e6; border: 1px solid #2a2f36;
+    border-radius: 6px; font: inherit; font-family: ui-monospace, Menlo, monospace;
+  }
+  input:focus { outline: none; border-color: #4a7cff; }
+  button {
+    margin-top: 14px; width: 100%; padding: 10px;
+    background: #4a7cff; color: #fff; border: 0; border-radius: 6px;
+    font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button:hover { background: #3b6bee; }
+  button:disabled { opacity: 0.6; cursor: wait; }
+  .err {
+    margin-top: 12px; font-size: 13px; color: #ff6b6b;
+    min-height: 18px;
+  }
+  .footer {
+    margin-top: 16px; font-size: 11px; color: #5b626b; text-align: center;
+  }
+</style>
+</head>
+<body>
+  <form class="card" id="f">
+    <h1>🐔 coopd</h1>
+    <p class="sub">enter your api token to continue</p>
+    <label for="t">API token</label>
+    <input id="t" type="password" autocomplete="current-password" autofocus required />
+    <button type="submit" id="b">Sign in</button>
+    <div class="err" id="e"></div>
+    <div class="footer">set via <code>COOP_API_TOKEN</code> on the host</div>
+  </form>
+<script>
+const f = document.getElementById('f');
+const b = document.getElementById('b');
+const e = document.getElementById('e');
+const t = document.getElementById('t');
+f.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  e.textContent = '';
+  b.disabled = true;
+  b.textContent = 'Signing in…';
+  try {
+    const r = await fetch('/api/v1/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ token: t.value }),
+    });
+    if (r.ok) {
+      location.href = '/farm';
+      return;
+    }
+    const j = await r.json().catch(() => ({}));
+    e.textContent = j.error || ('sign-in failed (' + r.status + ')');
+  } catch (err) {
+    e.textContent = String(err);
+  } finally {
+    b.disabled = false;
+    b.textContent = 'Sign in';
+  }
+});
+</script>
+</body>
+</html>

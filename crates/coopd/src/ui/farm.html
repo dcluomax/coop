@@ -1,0 +1,3321 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>🐔 Coop Farm</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css"
+        integrity="sha384-LJcOxlx9IMbNXDqJ2axpfEQKkAYbFjJfhXexLfiRJhjDU81mzgkiQq8rkV0j6dVh"
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <style>
+    :root {
+      --bg:        #0d1a14;
+      --bg-2:      #122218;
+      --grass:     #2d6a3e;
+      --grass-2:   #245834;
+      --soil:      #5b4226;
+      --panel:     #18241d;
+      --panel-2:   #1f2f26;
+      --line:      #2d4135;
+      --fg:        #e8f1ea;
+      --muted:     #8da599;
+      --accent:    #ffce5c;
+      --accent-2:  #6cd081;
+      --danger:    #ff6b6b;
+      --rooster:   #ff9a3c;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+      font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", sans-serif; overflow: hidden; }
+    a { color: var(--accent); }
+
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 18px; background: linear-gradient(180deg, #1a2a1f, #122218);
+      border-bottom: 1px solid var(--line); z-index: 5; position: relative;
+    }
+    header h1 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: 0.02em; }
+    header .farm-meta { color: var(--muted); font-size: 12px; }
+    header .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px; background: rgba(108,208,129,0.12);
+      border: 1px solid rgba(108,208,129,0.3); border-radius: 999px;
+      color: var(--accent-2); font-size: 11px; font-weight: 600;
+    }
+    header .pill .dot { width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent-2); box-shadow: 0 0 6px var(--accent-2); }
+    header .pill.offline { background: rgba(255,107,107,0.12); border-color: rgba(255,107,107,0.3); color: var(--danger); }
+    header .pill.offline .dot { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+    header .cfg-btn {
+      margin-left: 10px; background: transparent; color: var(--text);
+      border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px;
+      cursor: pointer; font-size: 14px; line-height: 1;
+    }
+    header .cfg-btn:hover { background: rgba(255,255,255,0.04); }
+    /* Push pill+gear together to the right when h1 takes left space */
+    header > h1 { flex: 1; }
+
+    /* === Config modal extras === */
+    .cfg-section { margin: 0 0 22px; }
+    .cfg-section h4 {
+      margin: 0 0 10px; font-size: 11px; text-transform: uppercase;
+      letter-spacing: 0.12em; color: var(--muted); font-weight: 700;
+    }
+    .loc-list { list-style: none; padding: 0; margin: 0;
+      display: flex; flex-direction: column; gap: 6px; }
+    .loc-list li {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--bg); border: 1px solid var(--line);
+      border-radius: 8px; padding: 8px 10px;
+    }
+    .loc-list .lbl { font-size: 11px; color: var(--muted); min-width: 110px; }
+    .loc-list .url { flex: 1; font-family: ui-monospace, monospace;
+      font-size: 12px; color: var(--accent-2); word-break: break-all; }
+    .loc-list .copy {
+      background: rgba(108,208,129,0.12); color: var(--accent-2);
+      border: 1px solid rgba(108,208,129,0.3); border-radius: 6px;
+      padding: 3px 8px; font-size: 11px; cursor: pointer;
+    }
+    .loc-list .copy:hover { background: rgba(108,208,129,0.2); }
+    .loc-list .scope-lan { border-left: 3px solid var(--accent-2); }
+    .loc-list .scope-local { opacity: 0.7; }
+    .loc-warning {
+      background: rgba(255,170,80,0.10); border: 1px solid rgba(255,170,80,0.3);
+      color: #ffb060; font-size: 12px; padding: 8px 10px; border-radius: 8px;
+      margin-bottom: 8px;
+    }
+    .toggle-row { display: flex; align-items: center; gap: 10px; margin: 6px 0 14px; }
+    .toggle-row input { width: 16px; height: 16px; }
+    .toggle-row label { display: inline; text-transform: none;
+      font-size: 13px; color: var(--text); letter-spacing: normal; }
+
+    main { display: grid; grid-template-columns: 280px 1fr; height: calc(100vh - 49px); }
+
+    /* === Left rail === */
+    aside {
+      background: var(--panel); border-right: 1px solid var(--line);
+      overflow-y: auto; display: flex; flex-direction: column;
+    }
+    aside h2 {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em;
+      color: var(--muted); margin: 14px 16px 6px;
+    }
+    .raise-bar { padding: 14px 14px 6px; }
+    .raise-bar button {
+      width: 100%;
+      background: linear-gradient(180deg, #ffd773, #ffb441);
+      color: #2a1d05; border: none; border-radius: 10px; padding: 11px 12px;
+      cursor: pointer; font-weight: 700; font-size: 13px; letter-spacing: 0.02em;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.25), inset 0 -2px 0 rgba(0,0,0,0.15);
+      transition: transform 0.08s;
+    }
+    .raise-bar button:hover { filter: brightness(1.06); }
+    .raise-bar button:active { transform: translateY(1px); }
+
+    .flock-list { padding: 0 6px 16px; }
+    .chick {
+      display: grid; grid-template-columns: 44px 1fr auto; align-items: center;
+      gap: 10px; padding: 8px 10px; margin: 2px 4px; cursor: pointer;
+      border-radius: 8px; border-left: 3px solid transparent;
+      transition: background 0.12s;
+    }
+    .chick:hover { background: var(--panel-2); }
+    .chick.active { background: var(--panel-2); border-left-color: var(--accent); }
+    .chick .avatar {
+      width: 40px; height: 40px; border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, #3d5645, #1c2b22);
+      display: grid; place-items: center; font-size: 22px;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
+    }
+    .chick .avatar.rooster { background: radial-gradient(circle at 30% 30%, #5a3a2a, #2a1e16); }
+    .chick .meta { min-width: 0; }
+    .chick .name { font-weight: 600; font-size: 13px; }
+    .chick .sub { font-size: 11px; color: var(--muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .badge {
+      display: inline-block; padding: 2px 7px; border-radius: 999px;
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .badge.idle    { background: rgba(108,208,129,0.18); color: var(--accent-2); }
+    .badge.working { background: rgba(255,206,92,0.18); color: var(--accent);
+      animation: pulse 1.6s infinite ease-in-out; }
+    .badge.defined, .badge.hatching {
+      background: rgba(141,165,153,0.18); color: var(--muted); }
+    .badge.dormant, .badge.archived, .badge.sleeping {
+      background: rgba(141,165,153,0.18); color: var(--muted); }
+    .badge.error { background: rgba(255,107,107,0.2); color: var(--danger); }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+    /* === Main yard === */
+    section.yard {
+      display: flex; flex-direction: column; min-width: 0; position: relative;
+      background:
+        radial-gradient(circle at 20% 80%, rgba(108,208,129,0.06) 0%, transparent 50%),
+        radial-gradient(circle at 80% 20%, rgba(255,206,92,0.05) 0%, transparent 50%),
+        linear-gradient(180deg, var(--bg-2) 0%, #0a1510 100%);
+    }
+    .yard-toolbar {
+      padding: 10px 18px; border-bottom: 1px solid var(--line);
+      display: flex; align-items: center; gap: 10px;
+      background: rgba(15, 24, 19, 0.7); backdrop-filter: blur(6px);
+    }
+    .yard-toolbar .title { font-weight: 600; }
+    .yard-toolbar .hint  { color: var(--muted); font-size: 12px; margin-left: auto; }
+
+    /* ====================================================================
+       The Farm — a proper farm-game scene (sky / ground / props / chickens)
+       =================================================================== */
+    .yard-grid {
+      flex: 1; position: relative; overflow: hidden;
+      background:
+        linear-gradient(180deg,
+          #ffd49a 0%,         /* warm horizon sky (top 25%) */
+          #b8e1c8 25%,        /* sky-meets-hill band */
+          #6fae6a 32%,        /* far hill */
+          #58a05e 36%,        /* mid hill */
+          #4a8e51 100%);      /* foreground grass */
+      transition: background 0.8s ease;
+    }
+    /* Sky band (sun, clouds live here) */
+    .sky-band {
+      position: absolute; left: 0; right: 0; top: 0; height: 26%;
+      pointer-events: none; overflow: hidden;
+    }
+    .sun {
+      position: absolute; width: 64px; height: 64px; border-radius: 50%;
+      background: radial-gradient(circle at 40% 40%, #fff6c2, #ffd24f 55%, #f59e2b 100%);
+      box-shadow: 0 0 38px rgba(255,210,79,0.7), 0 0 90px rgba(255,180,40,0.35);
+      animation: sun-arc 90s linear infinite;
+      top: 12%;
+    }
+    @keyframes sun-arc {
+      0%   { left: -8%;  top: 70%; }
+      25%  { left: 25%;  top: 18%; }
+      50%  { left: 50%;  top: 6%; }
+      75%  { left: 75%;  top: 18%; }
+      100% { left: 108%; top: 70%; }
+    }
+    .cloud {
+      position: absolute; font-size: 44px; opacity: 0.92;
+      filter: drop-shadow(0 4px 6px rgba(0,0,0,0.12));
+      animation: cloud-drift linear infinite;
+      top: 6%;
+    }
+    .cloud.c2 { top: 14%; font-size: 36px; animation-duration: 70s; opacity: 0.85; }
+    .cloud.c3 { top: 22%; font-size: 32px; animation-duration: 95s; opacity: 0.7; }
+    @keyframes cloud-drift {
+      from { transform: translateX(-200px); }
+      to   { transform: translateX(calc(100vw + 200px)); }
+    }
+    .cloud { animation-duration: 80s; }
+
+    /* Grass tile texture (checker pattern of two greens) over the bottom */
+    .yard-grid::before {
+      content: ""; position: absolute; left: 0; right: 0; top: 32%; bottom: 0;
+      pointer-events: none;
+      background:
+        /* tiny grass blades */
+        radial-gradient(circle 1.5px at 8%  88%, rgba(255,255,255,0.18) 0, transparent 100%),
+        radial-gradient(circle 1.5px at 18% 76%, rgba(255,255,255,0.15) 0, transparent 100%),
+        radial-gradient(circle 1.5px at 32% 92%, rgba(255,255,255,0.20) 0, transparent 100%),
+        radial-gradient(circle 1.5px at 47% 70%, rgba(255,255,255,0.15) 0, transparent 100%),
+        radial-gradient(circle 1.5px at 62% 86%, rgba(255,255,255,0.18) 0, transparent 100%),
+        radial-gradient(circle 1.5px at 76% 78%, rgba(255,255,255,0.20) 0, transparent 100%),
+        radial-gradient(circle 1.5px at 88% 92%, rgba(255,255,255,0.16) 0, transparent 100%),
+        /* checker tile pattern - very subtle */
+        repeating-linear-gradient( 0deg, rgba(255,255,255,0.025) 0 48px, transparent 48px 96px),
+        repeating-linear-gradient(90deg, rgba(0,0,0,0.04)        0 48px, transparent 48px 96px);
+    }
+    /* Dirt path through middle */
+    .yard-grid::after {
+      content: ""; position: absolute; left: 0; right: 0; pointer-events: none;
+      top: 56%; height: 70px;
+      background:
+        radial-gradient(ellipse 50% 60% at 50% 50%, rgba(140,98,60,0.55), transparent 70%),
+        linear-gradient(90deg,
+          transparent 0%,
+          rgba(140,98,60,0.45) 8%,
+          rgba(155,108,68,0.55) 50%,
+          rgba(140,98,60,0.45) 92%,
+          transparent 100%);
+      filter: blur(1.5px);
+    }
+
+    /* Fence along the very bottom of the screen */
+    .fence-bottom {
+      position: absolute; left: 0; right: 0; bottom: 0; height: 26px;
+      pointer-events: none; z-index: 1;
+      background:
+        /* horizontal rails */
+        linear-gradient(180deg, transparent 0 6px, #efe2c5 6px 10px, transparent 10px 16px, #efe2c5 16px 20px, transparent 20px 26px),
+        /* vertical posts: repeating */
+        repeating-linear-gradient(90deg, #d6c391 0 6px, transparent 6px 56px);
+      filter: drop-shadow(0 -2px 4px rgba(0,0,0,0.2));
+    }
+
+    /* === Buildings (pure CSS / emoji combos) === */
+    .building {
+      position: absolute; pointer-events: none; user-select: none;
+      filter: drop-shadow(0 4px 6px rgba(0,0,0,0.35));
+      z-index: 1;
+    }
+    .barn {
+      width: 110px; height: 90px;
+      background:
+        /* door */
+        linear-gradient(180deg, #5a2e1d 60%, #4a2516 100%) 38% 38% / 22% 50% no-repeat,
+        /* white X on door */
+        linear-gradient(45deg,  transparent 47%, #fff 47% 53%, transparent 53%) 38% 38% / 22% 50% no-repeat,
+        linear-gradient(-45deg, transparent 47%, #fff 47% 53%, transparent 53%) 38% 38% / 22% 50% no-repeat,
+        /* siding */
+        repeating-linear-gradient(0deg, #c0392b 0 8px, #b03325 8px 16px);
+      border-radius: 4px 4px 0 0;
+      border: 2px solid #6b1e15;
+    }
+    .barn::before {
+      content: ""; position: absolute; left: -8px; right: -8px; top: -34px; height: 44px;
+      background: linear-gradient(180deg, #6b1e15 0%, #8a2a1d 50%, #6b1e15 100%);
+      clip-path: polygon(0% 100%, 50% 0%, 100% 100%);
+    }
+    .barn::after {
+      content: "🐔"; position: absolute; top: -22px; left: 50%; transform: translateX(-50%);
+      font-size: 18px;
+    }
+    .henhouse {
+      width: 78px; height: 56px;
+      background:
+        /* door */
+        radial-gradient(ellipse 40% 60% at 50% 100%, #3a1f12 0 60%, transparent 60%),
+        /* wood */
+        repeating-linear-gradient(0deg, #d2a574 0 8px, #b88a5e 8px 16px);
+      border-radius: 4px;
+      border: 2px solid #5e3a20;
+    }
+    .henhouse::before {
+      content: ""; position: absolute; left: -6px; right: -6px; top: -20px; height: 26px;
+      background: linear-gradient(180deg, #6b3a20 0%, #8a4d2a 100%);
+      clip-path: polygon(0% 100%, 50% 0%, 100% 100%);
+    }
+    .silo {
+      width: 36px; height: 80px;
+      background: linear-gradient(180deg, #e8e4d8 0%, #c7c0ad 100%);
+      border-radius: 16px 16px 4px 4px;
+      border: 2px solid #8a8470;
+    }
+    .silo::before {
+      content: ""; position: absolute; left: -3px; right: -3px; top: -10px; height: 14px;
+      background: #8a8470; border-radius: 50% 50% 0 0;
+    }
+
+    /* Pond at water zone */
+    .pond {
+      position: absolute; width: 120px; height: 60px;
+      border-radius: 50%; pointer-events: none;
+      background:
+        radial-gradient(ellipse at 30% 30%, rgba(255,255,255,0.6) 0%, transparent 35%),
+        radial-gradient(ellipse at center, #4ec0e7 0%, #2a8fbd 70%, #1c6890 100%);
+      box-shadow: inset 0 -6px 10px rgba(0,0,0,0.25), 0 4px 8px rgba(0,0,0,0.3);
+      z-index: 0;
+    }
+    .pond::before, .pond::after {
+      content: ""; position: absolute; left: 50%; top: 50%;
+      width: 24px; height: 12px; border: 2px solid rgba(255,255,255,0.5);
+      border-radius: 50%; transform: translate(-50%, -50%);
+      animation: ripple 3s ease-out infinite;
+    }
+    .pond::after { animation-delay: 1.5s; }
+    @keyframes ripple {
+      0%   { transform: translate(-50%, -50%) scale(0.2); opacity: 1; }
+      100% { transform: translate(-50%, -50%) scale(3);   opacity: 0; }
+    }
+
+    /* Vegetable plot — 3 swaying crops */
+    .plot {
+      position: absolute; pointer-events: none;
+      width: 130px; height: 50px; border-radius: 4px;
+      background:
+        repeating-linear-gradient(90deg, #6e4426 0 8px, #5c3820 8px 16px);
+      box-shadow: inset 0 -4px 6px rgba(0,0,0,0.3), 0 2px 4px rgba(0,0,0,0.3);
+      z-index: 0;
+    }
+    .crop {
+      position: absolute; font-size: 26px;
+      transform-origin: 50% 100%; animation: sway 4s ease-in-out infinite;
+      filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));
+    }
+    @keyframes sway {
+      0%,100% { transform: rotate(-6deg); }
+      50%     { transform: rotate(6deg);  }
+    }
+
+    /* Trees */
+    .tree-big {
+      position: absolute; font-size: 64px; pointer-events: none;
+      filter: drop-shadow(0 4px 6px rgba(0,0,0,0.35));
+      transform-origin: 50% 90%;
+      animation: tree-sway 8s ease-in-out infinite;
+      z-index: 1;
+    }
+    @keyframes tree-sway {
+      0%,100% { transform: rotate(-1.5deg); }
+      50%     { transform: rotate(1.5deg);  }
+    }
+
+    /* Flowers & rocks dotting the field */
+    .deco { position: absolute; pointer-events: none; user-select: none;
+      filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3)); z-index: 0; }
+
+    /* === Particle layer (above props, below sprites) === */
+    .particle {
+      position: absolute; pointer-events: none; font-size: 14px;
+      will-change: transform, opacity; z-index: 3;
+    }
+    .p-feather { animation: float-feather 2.6s ease-out forwards; }
+    @keyframes float-feather {
+      0%   { transform: translate(0,0) rotate(0); opacity: 1; }
+      100% { transform: translate(var(--dx, 20px), -50px) rotate(360deg); opacity: 0; }
+    }
+    .p-dust { animation: poof 0.9s ease-out forwards; }
+    @keyframes poof {
+      0%   { transform: scale(0.2); opacity: 0.9; }
+      100% { transform: scale(1.8); opacity: 0; }
+    }
+    .p-egg { animation: egg-pop 1.6s ease-out forwards; }
+    @keyframes egg-pop {
+      0%   { transform: translateY(0) scale(0.4); opacity: 0; }
+      30%  { transform: translateY(-12px) scale(1.2); opacity: 1; }
+      100% { transform: translateY(-26px) scale(1); opacity: 0; }
+    }
+    .p-heart { animation: heart-rise 1.8s ease-out forwards; }
+    @keyframes heart-rise {
+      0%   { transform: translateY(0) scale(0.6); opacity: 1; }
+      100% { transform: translateY(-40px) scale(1.2); opacity: 0; }
+    }
+    .p-note { animation: float-feather 2.2s ease-out forwards; color: #ffce5c; }
+
+    /* Butterfly that wanders the yard */
+    .butterfly {
+      position: absolute; font-size: 18px; pointer-events: none;
+      animation: bf-flap 0.2s ease-in-out infinite alternate;
+      z-index: 4;
+      transition: transform 0.4s linear;
+    }
+    @keyframes bf-flap {
+      from { transform: translate(-50%,-50%) scale(1)    rotate(-8deg); }
+      to   { transform: translate(-50%,-50%) scale(0.78) rotate(8deg);  }
+    }
+
+    /* scenery items (nests, feed bowl, fence) */
+    .scene { position: absolute; pointer-events: none; user-select: none;
+      font-size: 28px; opacity: 0.85;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); }
+    .nest    { font-size: 34px; opacity: 0.9; }
+    .feeder  { font-size: 26px; }
+    .fence   { font-size: 18px; opacity: 0.4; letter-spacing: -4px; }
+    .zone-label {
+      position: absolute; transform: translateX(-50%);
+      font-size: 9px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.12em; color: var(--muted); pointer-events: none;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    }
+    /* highlight ring for a zone when a chicken is working there */
+    .zone-ring {
+      position: absolute; border-radius: 50%; pointer-events: none;
+      border: 2px dashed rgba(255,206,92,0.0);
+      transition: border-color 0.4s, box-shadow 0.4s;
+      width: 110px; height: 110px; transform: translate(-50%, -50%);
+    }
+    .zone-ring.active {
+      border-color: rgba(255,206,92,0.55);
+      box-shadow: 0 0 24px rgba(255,206,92,0.25);
+      animation: ring-pulse 2s ease-in-out infinite;
+    }
+    @keyframes ring-pulse {
+      0%,100% { transform: translate(-50%, -50%) scale(1);    opacity: 0.9; }
+      50%     { transform: translate(-50%, -50%) scale(1.08); opacity: 0.55; }
+    }
+
+    /* === Day / night overlay === */
+    .yard-grid.night {
+      background: linear-gradient(180deg,
+        #0a0e2a 0%,
+        #122152 22%,
+        #1c2f60 32%,
+        #1d3a4a 38%,
+        #1c3424 100%);
+    }
+    .yard-grid.night .sun {
+      background: radial-gradient(circle at 35% 35%, #fafad2, #d6d6c0 65%, #b8b89d 100%);
+      box-shadow: 0 0 30px rgba(220,220,200,0.5);
+    }
+    .yard-grid.night::after {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      background: radial-gradient(ellipse at 30% 20%, rgba(120,130,255,0.06) 0%, transparent 60%),
+                  linear-gradient(180deg, rgba(15,18,40,0.45), rgba(5,8,18,0.55));
+      mix-blend-mode: multiply;
+    }
+    .yard-grid.night .scene { filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6)) brightness(0.75); }
+
+    /* === Bottom command bar === */
+    .cmd-bar {
+      position: absolute; left: 12px; right: 12px; bottom: 12px;
+      background: rgba(24, 36, 29, 0.96); backdrop-filter: blur(10px);
+      border: 1px solid var(--line); border-radius: 14px;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+      padding: 10px 12px; z-index: 8;
+      display: flex; flex-direction: column; gap: 8px;
+      transform: translateY(140%); opacity: 0;
+      transition: transform 0.25s ease, opacity 0.25s ease;
+    }
+    .cmd-bar.open { transform: translateY(0); opacity: 1; }
+    .cmd-bar .row { display: flex; align-items: center; gap: 8px; }
+    .cmd-bar .target {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px; border-radius: 999px;
+      background: rgba(255,206,92,0.14); border: 1px solid rgba(255,206,92,0.35);
+      color: var(--accent); font-weight: 700; font-size: 12px;
+    }
+    .cmd-bar .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+    .cmd-bar .chip {
+      padding: 4px 10px; border-radius: 999px; cursor: pointer;
+      background: rgba(108,208,129,0.10); border: 1px solid rgba(108,208,129,0.30);
+      color: var(--accent-2); font-size: 11px; font-weight: 600;
+    }
+    .cmd-bar .chip:hover { background: rgba(108,208,129,0.20); }
+    .cmd-bar input[type=text] {
+      flex: 1; background: rgba(0,0,0,0.30); color: var(--fg);
+      border: 1px solid var(--line); border-radius: 10px;
+      padding: 9px 12px; font-size: 13px; outline: none;
+    }
+    .cmd-bar input[type=text]:focus { border-color: var(--accent); }
+    .cmd-bar button.send {
+      background: var(--accent); color: #111; border: 0;
+      border-radius: 10px; padding: 9px 16px; font-weight: 700; cursor: pointer;
+    }
+    .cmd-bar button.send:disabled { opacity: 0.4; cursor: not-allowed; }
+    .cmd-bar .close-x {
+      background: transparent; border: 0; color: var(--muted);
+      font-size: 18px; cursor: pointer; padding: 0 4px;
+    }
+    .cmd-bar .target .state-tag {
+      margin-left: 6px; font-size: 10px; padding: 1px 7px;
+      border-radius: 999px; background: rgba(0,0,0,0.30);
+      color: var(--muted); font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .cmd-bar .target .state-tag.s-idle    { color: var(--accent-2); }
+    .cmd-bar .target .state-tag.s-working { color: var(--accent); }
+    .cmd-bar .target .state-tag.s-defined,
+    .cmd-bar .target .state-tag.s-sleeping,
+    .cmd-bar .target .state-tag.s-dormant { color: var(--muted); }
+    .cmd-bar .chat-log {
+      max-height: 180px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 6px;
+      padding: 6px 4px; margin: 0;
+    }
+    .cmd-bar .chat-log:empty { display: none; }
+    .cmd-bar .chat-msg {
+      display: flex; gap: 8px; align-items: flex-start;
+      font-size: 12px; line-height: 1.4;
+    }
+    .cmd-bar .chat-msg .who {
+      flex: 0 0 auto; font-weight: 700; font-size: 11px;
+      padding: 2px 8px; border-radius: 999px;
+    }
+    .cmd-bar .chat-msg.user .who {
+      background: rgba(255,206,92,0.18); color: var(--accent);
+    }
+    .cmd-bar .chat-msg.hen .who {
+      background: rgba(108,208,129,0.16); color: var(--accent-2);
+    }
+    .cmd-bar .chat-msg .body {
+      flex: 1; color: var(--fg); word-break: break-word;
+      background: rgba(0,0,0,0.20); padding: 4px 8px; border-radius: 8px;
+    }
+    .cmd-bar .chat-msg.hen.queued .body { color: var(--muted); font-style: italic; }
+    .cmd-bar .chat-msg.hen.error  .body { color: var(--danger); }
+
+    /* === Right-click context menu === */
+    .ctx-menu {
+      position: fixed; z-index: 9999; min-width: 180px;
+      background: rgba(24, 36, 29, 0.98); backdrop-filter: blur(10px);
+      border: 1px solid var(--line); border-radius: 10px;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+      padding: 6px; display: none;
+    }
+    .ctx-menu.open { display: block; }
+    .ctx-menu .item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 12px; border-radius: 6px;
+      cursor: pointer; font-size: 13px; color: var(--fg);
+    }
+    .ctx-menu .item:hover { background: rgba(255,255,255,0.06); }
+    .ctx-menu .item.danger:hover { background: rgba(255,107,107,0.15); color: var(--danger); }
+    .ctx-menu .sep { height: 1px; background: var(--line); margin: 4px 6px; }
+
+    /* === Yard controls (day/night toggle) === */
+    .yard-controls {
+      position: absolute; top: 12px; right: 12px; z-index: 6;
+      display: flex; gap: 8px; align-items: center;
+    }
+    .day-toggle {
+      background: rgba(24, 36, 29, 0.85); backdrop-filter: blur(6px);
+      border: 1px solid var(--line);
+      border-radius: 8px; padding: 4px 8px; cursor: pointer;
+      font-size: 14px; color: var(--fg);
+    }
+    .day-toggle:hover { background: rgba(255,255,255,0.10); }
+
+    /* === Floating prompt bubble for working chickens === */
+    .sprite .job-bubble {
+      position: absolute; top: -34px; left: 50%;
+      transform: translateX(-50%) scale(0.9);
+      background: rgba(255,206,92,0.95); color: #111;
+      border-radius: 10px; padding: 3px 8px;
+      font-size: 10px; font-weight: 700;
+      max-width: 160px; white-space: nowrap; overflow: hidden;
+      text-overflow: ellipsis;
+      opacity: 0; transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+    }
+    .sprite .job-bubble::after {
+      content: ""; position: absolute; bottom: -4px; left: 50%;
+      transform: translateX(-50%) rotate(45deg);
+      width: 8px; height: 8px; background: rgba(255,206,92,0.95);
+    }
+    .sprite.show-job .job-bubble { opacity: 1; transform: translateX(-50%) scale(1); }
+
+    /* Floating result toast when a job finishes */
+    .toast {
+      position: absolute; left: 50%; bottom: 90px;
+      transform: translateX(-50%) translateY(20px);
+      background: rgba(108,208,129,0.95); color: #0d1a14;
+      padding: 10px 16px; border-radius: 10px;
+      font-weight: 700; font-size: 13px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      opacity: 0; pointer-events: none; z-index: 50;
+      transition: opacity 0.3s, transform 0.3s;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* === The sprites === */
+    .sprite {
+      position: absolute; left: 0; top: 0;
+      width: 80px; height: 80px;
+      cursor: pointer; user-select: none;
+      transform: translate3d(0,0,0);
+      will-change: transform;
+      transition: filter 0.15s;
+      z-index: 10;
+    }
+    .sprite:hover  { filter: drop-shadow(0 0 8px #fff); }
+    .sprite.active { filter: drop-shadow(0 0 10px var(--accent)) drop-shadow(0 0 18px var(--accent)); z-index: 50; }
+
+    /* shadow blob under each chicken — sells the depth */
+    .sprite .shadow {
+      position: absolute; bottom: 4px; left: 50%;
+      width: 44px; height: 9px; border-radius: 50%;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0.45) 0%, transparent 70%);
+      transform: translateX(-50%); pointer-events: none;
+      transition: transform 0.2s, opacity 0.2s;
+    }
+
+    /* The actual chicken body (SVG sprite OR egg emoji fallback) */
+    .sprite .body {
+      position: absolute; bottom: 2px; left: 50%;
+      width: 72px; height: 72px;
+      line-height: 1; display: inline-block;
+      transform-origin: 50% 80%; pointer-events: none;
+      transform: translateX(-50%);
+      filter: drop-shadow(0 3px 4px rgba(0,0,0,0.5));
+    }
+    .sprite .body.egg-emoji { font-size: 48px; width: auto; height: auto; bottom: 8px; }
+    .sprite .chk-svg { width: 100%; height: 100%; overflow: visible; }
+    /* Per-piece animation anchors. */
+    .sprite .chk-head  { transform-origin: 56px 30px; transform-box: fill-box; }
+    .sprite .chk-wing  { transform-origin: 36px 46px; transform-box: fill-box; }
+    .sprite .chk-tail  { transform-origin: 22px 32px; transform-box: fill-box; }
+    .sprite .chk-leg-l { transform-origin: 36px 62px; transform-box: fill-box; }
+    .sprite .chk-leg-r { transform-origin: 48px 62px; transform-box: fill-box; }
+    /* flip horizontally when walking left */
+    .sprite[data-facing="-1"] .body { transform: translateX(-50%) scaleX(-1); }
+
+    .sprite .name {
+      position: absolute; bottom: -14px; left: 50%; transform: translateX(-50%);
+      font-size: 10px; font-weight: 700; color: #fff; white-space: nowrap;
+      text-shadow: 0 1px 0 #000, 0 0 4px rgba(0,0,0,0.9), 1px 1px 2px rgba(0,0,0,0.9);
+      pointer-events: none;
+    }
+    .sprite .state-icon {
+      position: absolute; top: -2px; right: -2px; font-size: 14px;
+      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.7));
+      pointer-events: none;
+    }
+    /* speech bubble when working: shows the current activity */
+    .sprite .bubble {
+      position: absolute; top: -22px; left: 50%;
+      transform: translateX(-50%) scale(0.85);
+      background: rgba(255,255,255,0.92); color: #111;
+      border-radius: 10px; padding: 2px 7px; font-size: 10px; font-weight: 600;
+      white-space: nowrap; opacity: 0;
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+    }
+    .sprite.show-bubble .bubble { opacity: 1; transform: translateX(-50%) scale(1); }
+
+    /* === Per-state body animations === */
+    .sprite.s-idle .body    { animation: bob 2.6s ease-in-out infinite; }
+    .sprite.s-working .body { animation: peck-busy 0.55s ease-in-out infinite; }
+    .sprite.s-hatching .body, .sprite.s-defined .body {
+      animation: hatch 0.5s ease-in-out infinite;
+    }
+    .sprite.s-dormant .body, .sprite.s-sleeping .body, .sprite.s-archived .body {
+      animation: breathe 3.5s ease-in-out infinite; opacity: 0.65;
+    }
+    .sprite.s-error .body   { animation: angry 0.4s ease-in-out infinite; filter: hue-rotate(-60deg); }
+
+    /* behaviour overrides set by JS */
+    .sprite.b-walk .body { animation: walk-bob 0.32s ease-in-out infinite; }
+    .sprite.b-peck .body { animation: peck-once 0.55s ease-in-out; }
+    .sprite.b-sleep .body { animation: sleep-breathe 4s ease-in-out infinite;
+                            transform: translateX(-50%) translateY(8px) scale(0.85); opacity: 0.7; }
+    .sprite.b-sleep .shadow { transform: translateX(-50%) scale(1.15, 0.6); opacity: 0.85; }
+    .sprite.b-sleep::after {
+      content: "💤"; position: absolute; top: -8px; right: 4px;
+      font-size: 12px; opacity: 0.85;
+      animation: zzz 2.5s ease-in-out infinite;
+    }
+
+    @keyframes bob {
+      0%,100% { transform: translateX(-50%) translateY(0)   rotate(-1deg); }
+      50%     { transform: translateX(-50%) translateY(-4px) rotate(1deg); }
+    }
+    @keyframes walk-bob {
+      0%,100% { transform: translateX(-50%) translateY(0)   rotate(-3deg); }
+      50%     { transform: translateX(-50%) translateY(-3px) rotate(3deg); }
+    }
+    @keyframes peck-once {
+      0%,100% { transform: translateX(-50%) rotate(0)     translateY(0); }
+      50%     { transform: translateX(-50%) rotate(35deg) translateY(8px); }
+    }
+    @keyframes peck-busy {
+      0%,100% { transform: translateX(-50%) rotate(-4deg) translateY(0); }
+      45%,55% { transform: translateX(-50%) rotate(28deg) translateY(6px); }
+    }
+    @keyframes hatch {
+      0%,100% { transform: translateX(-50%) rotate(0); }
+      25%     { transform: translateX(-50%) rotate(-15deg); }
+      75%     { transform: translateX(-50%) rotate(15deg); }
+    }
+    @keyframes breathe {
+      0%,100% { transform: translateX(-50%) scale(1)    rotate(0); }
+      50%     { transform: translateX(-50%) scale(1.04) rotate(0); }
+    }
+    @keyframes sleep-breathe {
+      0%,100% { transform: translateX(-50%) translateY(8px) scale(0.85)  rotate(0deg); }
+      50%     { transform: translateX(-50%) translateY(9px) scale(0.88)  rotate(0deg); }
+    }
+    @keyframes angry {
+      0%,100% { transform: translateX(-50%) translateX(0); }
+      25%     { transform: translateX(-50%) translateX(-3px) rotate(-6deg); }
+      75%     { transform: translateX(-50%) translateX(3px)  rotate(6deg); }
+    }
+    @keyframes zzz {
+      0%   { transform: translateY(0)   scale(0.8); opacity: 0; }
+      30%  { transform: translateY(-4px) scale(1);   opacity: 0.9; }
+      100% { transform: translateY(-14px) scale(1.2); opacity: 0; }
+    }
+
+    /* === Per-piece animations for the SVG sprite === */
+    .sprite.s-idle .chk-head      { animation: chk-head-bob 2.4s ease-in-out infinite; }
+    .sprite.s-idle .chk-tail      { animation: chk-tail-twitch 4.5s ease-in-out infinite; }
+    .sprite.s-working .chk-wing   { animation: chk-wing-flap 0.45s ease-in-out infinite; }
+    .sprite.s-working .chk-head   { animation: chk-head-peck 0.55s ease-in-out infinite; }
+    .sprite.b-walk .chk-leg-l     { animation: chk-leg-step 0.32s ease-in-out infinite; }
+    .sprite.b-walk .chk-leg-r     { animation: chk-leg-step 0.32s ease-in-out infinite reverse; }
+    .sprite.b-walk .chk-head      { animation: chk-head-bob 0.32s ease-in-out infinite; }
+    .sprite.b-walk .chk-tail      { animation: chk-tail-twitch 1.6s ease-in-out infinite; }
+    .sprite.b-peck .chk-head      { animation: chk-head-peck-once 0.55s ease-in-out; }
+    .sprite.b-sleep .chk-head     { animation: chk-head-sleep 4s ease-in-out infinite; transform: translateY(4px) rotate(8deg); }
+    .sprite.b-sleep .chk-wing     { animation: chk-wing-breathe 4s ease-in-out infinite; }
+    .sprite.s-error .chk-head     { animation: chk-head-shake 0.4s ease-in-out infinite; }
+    .sprite.s-error .chk-wing     { animation: chk-wing-flap 0.18s ease-in-out infinite; }
+
+    @keyframes chk-head-bob {
+      0%,100% { transform: translateY(0) rotate(0deg); }
+      50%     { transform: translateY(-2px) rotate(-3deg); }
+    }
+    @keyframes chk-head-peck {
+      0%,100% { transform: translate(0,0) rotate(0deg); }
+      45%     { transform: translate(6px, 10px) rotate(35deg); }
+      55%     { transform: translate(6px, 10px) rotate(35deg); }
+    }
+    @keyframes chk-head-peck-once {
+      0%,100% { transform: translate(0,0) rotate(0deg); }
+      50%     { transform: translate(4px, 8px) rotate(25deg); }
+    }
+    @keyframes chk-head-shake {
+      0%,100% { transform: translateX(0) rotate(0deg); }
+      25%     { transform: translateX(-2px) rotate(-8deg); }
+      75%     { transform: translateX(2px)  rotate(8deg); }
+    }
+    @keyframes chk-head-sleep {
+      0%,100% { transform: translateY(4px) rotate(8deg); }
+      50%     { transform: translateY(5px) rotate(10deg); }
+    }
+    @keyframes chk-wing-flap {
+      0%,100% { transform: rotate(0deg)   scaleY(1); }
+      50%     { transform: rotate(-22deg) scaleY(0.85); }
+    }
+    @keyframes chk-wing-breathe {
+      0%,100% { transform: scale(1); }
+      50%     { transform: scale(1.06); }
+    }
+    @keyframes chk-tail-twitch {
+      0%,100% { transform: rotate(0deg); }
+      80%     { transform: rotate(0deg); }
+      90%     { transform: rotate(12deg); }
+      95%     { transform: rotate(-6deg); }
+    }
+    @keyframes chk-leg-step {
+      0%,100% { transform: translateY(0)   rotate(0deg); }
+      50%     { transform: translateY(-3px) rotate(-12deg); }
+    }
+
+    /* Always honor [hidden] over any explicit display rule. */
+    [hidden] { display: none !important; }
+
+    /* Empty-yard hint */
+    .yard-empty {
+      flex: 1; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 32px;
+    }
+    .yard-empty[hidden] { display: none; }
+    .yard-empty .big { font-size: 72px; animation: bob 2.6s ease-in-out infinite; }
+
+    /* === Detail card overlay === */
+    .detail-card {
+      position: absolute; top: 60px; right: 18px; width: 360px; max-width: 92vw;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.55); padding: 0; z-index: 4;
+      transform: translateX(calc(100% + 40px)); transition: transform 0.25s ease-out;
+    }
+    .detail-card.open { transform: translateX(0); }
+    .detail-card .card-head {
+      padding: 16px 18px 12px; display: flex; align-items: center; gap: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .detail-card .card-head .face { font-size: 36px; line-height: 1; }
+    .detail-card .card-head h3 { margin: 0; font-size: 16px; }
+    .detail-card .card-head .id { color: var(--muted); font-size: 11px; }
+    .detail-card .card-head .x {
+      margin-left: auto; background: none; border: none; color: var(--muted);
+      font-size: 18px; cursor: pointer; padding: 4px 8px; line-height: 1;
+    }
+    .detail-card .card-head .x:hover { color: var(--fg); }
+    .detail-card .body { padding: 14px 18px 18px; max-height: calc(100vh - 200px); overflow-y: auto; }
+    .detail-card dl { margin: 0; display: grid; grid-template-columns: max-content 1fr;
+      gap: 6px 14px; font-size: 12px; }
+    .detail-card dt { color: var(--muted); }
+    .detail-card dd { margin: 0; }
+    .detail-card .tools-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+    .detail-card .tools-pills span {
+      background: var(--panel-2); padding: 2px 8px; border-radius: 999px;
+      font-size: 11px; border: 1px solid var(--line);
+    }
+    .detail-card .actions {
+      margin-top: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    }
+    .detail-card .actions button {
+      background: var(--panel-2); color: var(--fg); border: 1px solid var(--line);
+      border-radius: 8px; padding: 10px 12px; cursor: pointer; font-size: 12px;
+      font-weight: 600; transition: 0.12s;
+    }
+    .detail-card .actions button:hover { background: #2a3a30; border-color: var(--accent); }
+    .detail-card .actions button.primary {
+      background: linear-gradient(180deg, #ffd773, #ffb441); color: #2a1d05; border-color: transparent;
+      grid-column: 1 / -1;
+    }
+    .detail-card .actions button.danger { color: var(--danger); border-color: rgba(255,107,107,0.3); }
+    .detail-card .actions button.danger:hover { background: rgba(255,107,107,0.1); }
+
+    /* === Shell overlay === */
+    .shell-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+      display: none; align-items: stretch; justify-content: stretch;
+      z-index: 20; padding: 32px;
+    }
+    .shell-overlay.open { display: flex; }
+    .shell-frame {
+      flex: 1; background: #000; border-radius: 14px; border: 1px solid var(--line);
+      display: flex; flex-direction: column; overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.7);
+    }
+    .shell-frame .bar {
+      display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+      background: var(--panel); border-bottom: 1px solid var(--line);
+    }
+    .shell-frame .bar .title { font-weight: 600; font-size: 13px; }
+    .shell-frame .bar .x {
+      margin-left: auto; background: var(--panel-2); border: 1px solid var(--line);
+      color: var(--fg); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12px;
+    }
+    .shell-frame .term-host { flex: 1; padding: 6px; min-height: 0; }
+
+    /* === Raise modal === */
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.62);
+      display: none; align-items: center; justify-content: center; z-index: 30;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+      padding: 22px 24px; width: 460px; max-width: 92vw;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    }
+    .modal h3 { margin: 0 0 18px; font-size: 17px; }
+    .modal label { display: block; font-size: 11px; color: var(--muted);
+      margin: 12px 0 6px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
+    .modal input[type=text], .modal select, .modal textarea {
+      width: 100%; background: var(--panel-2); color: var(--fg);
+      border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; font: inherit;
+    }
+    .modal textarea { resize: vertical; min-height: 56px; font-family: ui-monospace, monospace; font-size: 12px; }
+    .sex-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .sex-card {
+      background: var(--panel-2); border: 2px solid var(--line); border-radius: 12px;
+      padding: 14px 8px; text-align: center; cursor: pointer; transition: 0.15s;
+    }
+    .sex-card:hover { border-color: #3a5546; }
+    .sex-card.selected { border-color: var(--accent); background: #233428; }
+    .sex-card .big { font-size: 40px; line-height: 1; animation: bob 2.6s ease-in-out infinite; }
+    .sex-card .label { margin-top: 8px; font-weight: 700; font-size: 13px; }
+    .sex-card .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .tools-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+    .tools-grid label {
+      display: flex; align-items: center; gap: 6px; margin: 0; text-transform: none;
+      letter-spacing: 0; font-size: 13px; color: var(--fg); cursor: pointer; font-weight: 400;
+    }
+    .name-row { display: flex; gap: 6px; align-items: stretch; }
+    .name-row input { flex: 1; }
+    .rand-btn {
+      background: var(--panel-2); color: var(--fg); border: 1px solid var(--line);
+      border-radius: 8px; padding: 0 12px; cursor: pointer; font-size: 18px;
+      transition: transform 0.2s, background 0.15s;
+    }
+    .rand-btn:hover    { background: var(--panel); }
+    .rand-btn:active   { transform: rotate(180deg) scale(0.95); }
+    .rand-btn.spinning { animation: rand-spin 0.5s ease-out; }
+    @keyframes rand-spin {
+      0%   { transform: rotate(0deg)   scale(1); }
+      50%  { transform: rotate(180deg) scale(1.2); }
+      100% { transform: rotate(360deg) scale(1); }
+    }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+    .modal-actions button {
+      background: var(--panel-2); color: var(--fg); border: 1px solid var(--line);
+      border-radius: 8px; padding: 8px 16px; cursor: pointer; font-weight: 600;
+    }
+    .modal-actions button.primary {
+      background: linear-gradient(180deg, #ffd773, #ffb441); color: #2a1d05; border-color: transparent;
+    }
+    .modal-actions button.primary:hover { filter: brightness(1.06); }
+    .modal .error { color: var(--danger); font-size: 12px; margin-top: 10px; min-height: 14px; }
+
+    /* === Top tab nav === */
+    .topnav { display: flex; gap: 4px; margin-left: 18px; flex: 1; }
+    .topnav .navtab {
+      background: transparent; border: 1px solid transparent;
+      color: var(--muted); padding: 6px 14px; border-radius: 8px;
+      cursor: pointer; font-size: 13px; font-weight: 600;
+    }
+    .topnav .navtab:hover { background: rgba(255,255,255,0.05); color: var(--fg); }
+    .topnav .navtab.active {
+      background: rgba(255,206,92,0.12); border-color: rgba(255,206,92,0.35);
+      color: var(--accent);
+    }
+    .tabview { display: grid; }
+    .tabview[hidden] { display: none; }
+    header > h1 { flex: 0 0 auto; }
+
+    /* === Console (full-screen tmux stream) === */
+    .console {
+      grid-column: 1 / -1; min-width: 0;
+      display: grid; grid-template-rows: auto 1fr;
+      height: calc(100vh - 49px); background: var(--bg);
+    }
+    .tmux-stage {
+      position: relative; min-height: 0;
+      background: #000; overflow: hidden;
+    }
+    .tmux-host { position: absolute; inset: 0; padding: 6px 8px; }
+    .tmux-host .xterm,
+    .tmux-host .xterm-viewport,
+    .tmux-host .xterm-screen { height: 100% !important; }
+    .tmux-empty {
+      position: absolute; inset: 0;
+      display: grid; place-content: center; text-align: center;
+      color: var(--fg); padding: 32px;
+    }
+    .tmux-empty h2 { margin: 0 0 12px; font-weight: 700; font-size: 22px; }
+    .tmux-empty p { color: var(--muted); line-height: 1.55; max-width: 560px; margin: 8px auto; }
+    .tmux-empty code {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
+      padding: 1px 6px; font-size: 12px; color: var(--accent-2);
+    }
+    .tmux-empty kbd {
+      background: var(--panel); border: 1px solid var(--line); border-bottom-width: 2px;
+      padding: 1px 6px; border-radius: 5px; font-size: 11px;
+      font-family: ui-monospace, monospace; color: var(--fg);
+    }
+    .head-actions select#open-hen-select {
+      background: var(--bg); color: var(--fg); border: 1px solid var(--line);
+      border-radius: 8px; padding: 5px 8px; font-size: 12px;
+    }
+    .console-head {
+      display: flex; align-items: center; gap: 14px;
+      padding: 8px 18px; border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    .sess-tabs { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; }
+    .sess-tabs .sess {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px 4px 12px; border-radius: 8px 8px 0 0;
+      background: transparent; border: 1px solid transparent; border-bottom: 0;
+      cursor: pointer; font-size: 12px; color: var(--muted);
+      white-space: nowrap;
+    }
+    .sess-tabs .sess:hover { background: rgba(255,255,255,0.04); color: var(--fg); }
+    .sess-tabs .sess.active {
+      background: var(--bg); border-color: var(--line);
+      color: var(--fg); position: relative;
+    }
+    .sess-tabs .sess.active::after {
+      content: ''; position: absolute; left: 0; right: 0; bottom: -1px;
+      height: 1px; background: var(--bg);
+    }
+    .sess-tabs .sess .x {
+      opacity: 0.5; padding: 0 2px; border-radius: 4px;
+    }
+    .sess-tabs .sess .x:hover { opacity: 1; background: rgba(255,255,255,0.08); }
+    .sess-tabs .sess.add {
+      color: var(--muted); padding: 4px 8px;
+    }
+    .head-actions { display: flex; align-items: center; gap: 8px; }
+    .head-actions input {
+      background: var(--bg); border: 1px solid var(--line); color: var(--fg);
+      border-radius: 8px; padding: 5px 10px; font-size: 12px; width: 200px;
+      outline: none;
+    }
+    .head-actions input:focus { border-color: var(--accent); }
+    .filter-group { display: flex; gap: 4px; }
+    .filter-group .filter {
+      background: transparent; border: 1px solid var(--line);
+      color: var(--muted); padding: 4px 10px; border-radius: 999px;
+      cursor: pointer; font-size: 11px; font-weight: 600;
+    }
+    .filter-group .filter.active {
+      background: rgba(108,208,129,0.14); border-color: rgba(108,208,129,0.35);
+      color: var(--accent-2);
+    }
+    .ghost-btn {
+      background: var(--bg); border: 1px solid var(--line); color: var(--muted);
+      border-radius: 8px; padding: 5px 10px; cursor: pointer;
+      font-family: ui-monospace, monospace; font-size: 11px;
+    }
+    .ghost-btn:hover { background: var(--panel-2); color: var(--fg); }
+
+    .blocks {
+      overflow-y: auto; padding: 20px 22px 8px;
+      display: flex; flex-direction: column; gap: 14px;
+      scroll-behavior: smooth;
+    }
+    .blocks-empty {
+      margin: auto; max-width: 520px; text-align: center; color: var(--fg);
+      padding: 40px 20px;
+    }
+    .blocks-empty h2 { margin: 0 0 10px; font-size: 22px; font-weight: 700; }
+    .blocks-empty p { color: var(--muted); line-height: 1.55; margin: 8px 0; }
+    .blocks-empty kbd {
+      background: var(--panel); border: 1px solid var(--line); border-bottom-width: 2px;
+      padding: 1px 6px; border-radius: 5px; font-size: 11px;
+      font-family: ui-monospace, monospace; color: var(--fg);
+    }
+
+    .block {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+      overflow: hidden; flex: 0 0 auto;
+      box-shadow: 0 1px 0 rgba(0,0,0,0.25);
+    }
+    .block.s-running { border-color: rgba(255,206,92,0.35); }
+    .block.s-failed  { border-color: rgba(255,107,107,0.30); }
+    .block.s-done    { }
+    .block .b-head {
+      display: grid; grid-template-columns: 22px 1fr auto auto;
+      gap: 10px; align-items: center;
+      padding: 10px 14px; border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+    }
+    .block .b-icon {
+      width: 20px; height: 20px; border-radius: 50%;
+      display: grid; place-items: center; font-size: 11px;
+      background: rgba(255,255,255,0.06); color: var(--muted);
+    }
+    .block.s-running .b-icon {
+      background: rgba(255,206,92,0.18); color: var(--accent);
+      animation: spin 1.4s linear infinite;
+    }
+    .block.s-done    .b-icon { background: rgba(108,208,129,0.18); color: var(--accent-2); }
+    .block.s-failed  .b-icon { background: rgba(255,107,107,0.20); color: var(--danger); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .block .b-prompt {
+      font-size: 13px; color: var(--fg); font-weight: 500;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      cursor: pointer;
+    }
+    .block .b-meta {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums;
+    }
+    .block .b-meta .hen {
+      color: var(--accent-2); font-weight: 600;
+    }
+    .block .b-actions {
+      display: flex; gap: 4px;
+    }
+    .block .b-actions button {
+      background: transparent; border: 1px solid transparent; color: var(--muted);
+      padding: 3px 7px; border-radius: 6px; cursor: pointer; font-size: 12px;
+    }
+    .block .b-actions button:hover { background: rgba(255,255,255,0.06); color: var(--fg); }
+    .block .b-body {
+      padding: 12px 16px; font-family: ui-monospace, "JetBrains Mono", monospace;
+      font-size: 12px; color: var(--fg); white-space: pre-wrap; word-break: break-word;
+      max-height: 380px; overflow: auto;
+    }
+    .block .b-body.error { color: var(--danger); }
+    .block .b-body.empty { color: var(--muted); font-style: italic; }
+    .block.collapsed .b-body { display: none; }
+
+    /* === Live sessions rail (xterm embedded above composer) === */
+    .sessions {
+      display: flex; flex-direction: column; gap: 10px;
+      padding: 0 22px;
+      max-height: 55vh; overflow-y: auto;
+    }
+    .sessions:empty { display: none; }
+    .session-block {
+      border: 1px solid var(--line); border-radius: 12px;
+      background: #0b0b0b; overflow: hidden;
+      display: flex; flex-direction: column;
+      box-shadow: 0 6px 22px rgba(0,0,0,0.45);
+    }
+    .session-block .sb-head {
+      display: flex; align-items: center; gap: 10px;
+      padding: 6px 12px; background: var(--panel);
+      border-bottom: 1px solid var(--line); font-size: 12px;
+    }
+    .session-block .sb-head .sb-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #6cd081; box-shadow: 0 0 8px rgba(108,208,129,0.7);
+    }
+    .session-block .sb-head .sb-title { color: var(--fg); font-weight: 600; }
+    .session-block .sb-head .sb-hen   { color: var(--muted); }
+    .session-block .sb-head .sb-spacer { flex: 1; }
+    .session-block .sb-head button {
+      background: transparent; border: 1px solid var(--line); color: var(--muted);
+      border-radius: 6px; padding: 2px 8px; font-size: 11px; cursor: pointer;
+    }
+    .session-block .sb-head button:hover { color: var(--fg); border-color: var(--accent); }
+    .session-block .sb-term { height: 320px; padding: 6px 8px; }
+
+    /* === Mode toggle (Task / Session) === */
+    .mode-toggle {
+      display: inline-flex; background: var(--bg);
+      border: 1px solid var(--line); border-radius: 8px; padding: 2px;
+    }
+    .mode-toggle .mode {
+      background: transparent; color: var(--muted);
+      border: 0; padding: 4px 10px; border-radius: 6px;
+      cursor: pointer; font-size: 11px; font-weight: 600;
+    }
+    .mode-toggle .mode.active {
+      background: var(--panel-2); color: var(--accent);
+      box-shadow: inset 0 0 0 1px rgba(255,206,92,0.25);
+    }
+
+    /* === Composer (sticky bottom, Warp signature) === */
+    .composer {
+      border-top: 1px solid var(--line);
+      background: linear-gradient(180deg, transparent, rgba(0,0,0,0.20));
+      padding: 10px 22px 14px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .composer-meta {
+      display: flex; align-items: center; gap: 12px;
+      font-size: 11px; color: var(--muted);
+    }
+    .agent-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px 4px 8px; border-radius: 999px;
+      background: rgba(255,206,92,0.10); border: 1px solid rgba(255,206,92,0.30);
+      color: var(--accent); font-weight: 600;
+    }
+    .agent-chip select {
+      background: transparent; border: 0; color: var(--accent);
+      font-size: 12px; font-weight: 600; outline: none; cursor: pointer;
+      padding-right: 14px;
+    }
+    .agent-chip select option { background: var(--panel); color: var(--fg); }
+    .composer-tips { margin-left: auto; opacity: 0.8; }
+    .composer-box {
+      display: flex; align-items: flex-end; gap: 8px;
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 12px; padding: 10px 12px;
+      transition: border-color 0.15s;
+    }
+    .composer-box:focus-within { border-color: var(--accent); }
+    .composer-box textarea {
+      flex: 1; resize: none; background: transparent; color: var(--fg);
+      border: 0; outline: none; font-family: inherit; font-size: 14px;
+      line-height: 1.45; min-height: 22px; max-height: 200px;
+    }
+    .send-btn {
+      background: linear-gradient(180deg, #ffd773, #ffb441); color: #2a1d05;
+      border: 0; border-radius: 10px; padding: 6px 14px;
+      cursor: pointer; font-weight: 700; font-size: 16px;
+      height: 34px;
+    }
+    .send-btn:hover { filter: brightness(1.06); }
+    .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .quick-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .quick-chips .chip {
+      padding: 4px 10px; border-radius: 999px; cursor: pointer;
+      background: rgba(108,208,129,0.10); border: 1px solid rgba(108,208,129,0.30);
+      color: var(--accent-2); font-size: 11px; font-weight: 600;
+    }
+    .quick-chips .chip:hover { background: rgba(108,208,129,0.20); }
+
+    /* === Command palette === */
+    .palette-backdrop {
+      position: fixed; inset: 0; z-index: 999;
+      background: rgba(0,0,0,0.55); backdrop-filter: blur(2px);
+      display: grid; place-items: start center; padding-top: 16vh;
+    }
+    .palette {
+      width: min(560px, 92vw); background: var(--panel);
+      border: 1px solid var(--line); border-radius: 14px;
+      box-shadow: 0 18px 40px rgba(0,0,0,0.6);
+      overflow: hidden;
+    }
+    .palette input {
+      width: 100%; padding: 14px 18px; background: transparent;
+      color: var(--fg); border: 0; outline: none; font-size: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .palette-list {
+      max-height: 320px; overflow-y: auto;
+    }
+    .palette-list .item {
+      padding: 9px 18px; cursor: pointer; font-size: 13px;
+      color: var(--fg); display: flex; align-items: center; gap: 10px;
+    }
+    .palette-list .item .src { color: var(--muted); font-size: 11px; margin-left: auto; }
+    .palette-list .item.sel,
+    .palette-list .item:hover { background: rgba(255,206,92,0.12); color: var(--accent); }
+    .palette-foot {
+      padding: 8px 16px; border-top: 1px solid var(--line);
+      color: var(--muted); font-size: 11px;
+    }
+
+    /* === Market pane === */
+    .market-pane {
+      grid-column: 1 / -1; padding: 36px 22px; overflow-y: auto; min-width: 0;
+      display: grid; place-items: start center;
+    }
+    .market-card {
+      max-width: 640px;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+      padding: 28px 32px;
+    }
+    .market-card h2 { margin: 0 0 14px; font-size: 22px; }
+    .market-card p { color: var(--fg); line-height: 1.55; margin: 0 0 12px; }
+    .market-card p.muted { color: var(--muted); font-size: 12px; }
+    .market-card code {
+      background: var(--bg); padding: 1px 5px; border-radius: 4px;
+      font-size: 11px; color: var(--accent-2);
+    }
+    .market-actions {
+      display: flex; align-items: center; gap: 16px; margin-top: 18px;
+    }
+    .market-cta {
+      background: linear-gradient(180deg, #ffd773, #ffb441); color: #2a1d05;
+      padding: 9px 18px; border-radius: 10px; font-weight: 700;
+      text-decoration: none; font-size: 13px;
+    }
+    .market-cta:hover { filter: brightness(1.06); }
+    .market-status { color: var(--muted); font-size: 12px; }
+
+    /* ===== Tasks pane ===== */
+    .tasks-pane { padding: 24px; max-width: 980px; margin: 0 auto; width: 100%; box-sizing: border-box; }
+    .tasks-composer { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; margin-bottom: 18px; }
+    .tasks-composer h2 { margin: 0 0 6px; font-size: 18px; }
+    .tasks-composer p.muted { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+    .task-row { display: flex; gap: 8px; }
+    .task-row select { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; min-width: 150px; }
+    .task-row input { flex: 1; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+    .task-row button.primary { background: linear-gradient(180deg, #6db8ff, #2d8cff); color: #08111d; border: 0; border-radius: 8px; padding: 8px 16px; font-weight: 700; cursor: pointer; }
+    .task-row button.primary:hover { filter: brightness(1.06); }
+    .tasks-list { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .tasks-empty { padding: 36px; text-align: center; color: var(--muted); font-size: 13px; }
+    .task-item { display: grid; grid-template-columns: 84px 110px 1fr 160px 90px; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
+    .task-item:last-child { border-bottom: 0; }
+    .task-item .ts { color: var(--muted); }
+    .task-item .kind { color: var(--accent-2); font-weight: 600; }
+    .task-item .prompt { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .task-item .claimed { color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; }
+    .task-item .stat { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; text-align: center; }
+    .stat.PENDING    { background: rgba(255,210,80,0.18); color: #ffd250; }
+    .stat.DISPATCHED { background: rgba(80,160,255,0.18); color: #6db8ff; }
+    .stat.DONE       { background: rgba(80,200,120,0.18); color: #6fdc8c; }
+    .stat.CANCELLED  { background: rgba(255,80,90,0.12); color: #ff8089; }
+    .task-actions { display: flex; gap: 4px; justify-self: end; }
+    .task-actions button { background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
+    .task-actions button:hover { color: var(--fg); border-color: var(--accent-2); }
+
+    /* ===== Detail-card login section ===== */
+    .dc-login { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
+    .dc-login h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
+    .dc-login .row { display: flex; gap: 6px; flex-wrap: wrap; }
+    .dc-login button { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 11px; cursor: pointer; }
+    .dc-login button:hover { border-color: var(--accent-2); }
+    .dc-login .vault-row { display: flex; gap: 6px; margin-top: 8px; }
+    .dc-login .vault-row input { flex: 1; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 11px; font-family: ui-monospace, monospace; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🐔 Coop Farm <span id="farm-id" class="farm-meta"></span></h1>
+    <nav class="topnav" id="topnav">
+      <button class="navtab active" data-tab="tasks">📋 Tasks</button>
+      <button class="navtab" data-tab="sessions">🖥 Sessions</button>
+      <button class="navtab" data-tab="agents">🐔 Agents</button>
+      <button class="navtab" data-tab="market" title="Cross-coop compute market (private repo)">🛒 Market</button>
+    </nav>
+    <span class="pill" id="savings-pill" title="Estimated savings from delegated work">💰 <span id="savings-text">$0 · 0 min</span></span>
+    <span class="pill" id="status-pill"><span class="dot"></span><span id="status-text">connecting…</span></span>
+    <button id="btn-config" class="cfg-btn" title="Settings">⚙️</button>
+  </header>
+
+  <main class="tabview" id="tab-agents" hidden>
+    <aside>
+      <div class="raise-bar">
+        <button id="btn-raise">🥚  Raise new chicken</button>
+      </div>
+      <h2>The flock</h2>
+      <div class="flock-list" id="flock-list"></div>
+    </aside>
+
+    <section class="yard">
+      <div class="yard-toolbar">
+        <span class="title" id="yard-title">The farmyard</span>
+        <span class="hint">Click chicken to inspect · 💬 to chat with it · Right-click for actions</span>
+      </div>
+      <div class="yard-grid" id="yard-grid">
+        <div class="yard-controls">
+          <button class="day-toggle" id="day-toggle" title="Toggle day/night">☀️</button>
+        </div>
+      </div>
+      <div class="yard-empty" id="yard-empty" hidden>
+        <div>
+          <div class="big">🥚</div>
+          <p>Your farmyard is empty.</p>
+          <p style="font-size:12px">Click <b>🥚 Raise new chicken</b> to hatch your first one.</p>
+        </div>
+      </div>
+
+      <!-- Sliding detail card -->
+      <div class="detail-card" id="detail-card">
+        <div class="card-head">
+          <span class="face" id="dc-face">🐔</span>
+          <div>
+            <h3 id="dc-name">chicken</h3>
+            <div class="id" id="dc-id">local.coop/chicken</div>
+          </div>
+          <button class="x" id="dc-close" title="Close">✕</button>
+        </div>
+        <div class="body">
+          <dl>
+            <dt>State</dt>      <dd><span class="badge" id="dc-state">IDLE</span></dd>
+            <dt>Sex</dt>        <dd id="dc-sex">hen</dd>
+            <dt>Brain</dt>      <dd id="dc-brain">—</dd>
+            <dt>Tools</dt>      <dd class="tools-pills" id="dc-tools"></dd>
+            <dt>XP / Level</dt> <dd id="dc-xp">0 / 0</dd>
+            <dt>Grain</dt>      <dd id="dc-grain">0 🪙</dd>
+            <dt>Created</dt>    <dd id="dc-created">—</dd>
+          </dl>
+          <div class="actions">
+            <button class="primary" id="dc-chat">💬 Chat</button>
+            <button id="dc-shell">🖥  Open shell</button>
+            <button id="dc-sleep">💤 Sleep</button>
+            <button id="dc-wake">🌅 Wake</button>
+            <button class="danger" id="dc-delete">🗑  Cull</button>
+          </div>
+          <div class="dc-login" id="dc-login" hidden>
+            <h4>🔑 Agent &amp; login</h4>
+            <div class="row" id="dc-login-actions"></div>
+            <div class="vault-row" id="dc-vault-row" hidden>
+              <input type="password" id="dc-vault-key" placeholder="paste API key" autocomplete="off" />
+              <button id="dc-vault-save">Save to vault</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Toast for job feedback -->
+      <div class="toast" id="toast"></div>
+
+      <!-- Bottom command bar (appears when a chicken is selected) -->
+      <div class="cmd-bar" id="cmd-bar">
+        <div class="row">
+          <span class="target" id="cmd-target">🐔 nobody</span>
+          <div class="chips" id="cmd-chips">
+            <span class="chip" data-prompt="Summarize the contents of README.md">📄 Summarize README</span>
+            <span class="chip" data-prompt="List files in the current directory">📁 List files</span>
+            <span class="chip" data-prompt="Run cargo test and report results">🧪 Run tests</span>
+            <span class="chip" data-prompt="What is the current git status?">🌿 git status</span>
+          </div>
+          <button class="close-x" id="cmd-close" title="Close">✕</button>
+        </div>
+        <div class="chat-log" id="cmd-log"></div>
+        <div class="row">
+          <input type="text" id="cmd-input" placeholder="Tell the chicken what to do… (e.g. 'analyze this log file')" />
+          <button class="send" id="cmd-send">Send 🪶</button>
+        </div>
+      </div>
+
+      <!-- Right-click context menu -->
+      <div class="ctx-menu" id="ctx-menu">
+        <div class="item" data-act="task">💼  Give task…</div>
+        <div class="item" data-act="inspect">🔍  Inspect</div>
+        <div class="item" data-act="shell">🖥  Open shell</div>
+        <div class="sep"></div>
+        <div class="item" data-act="sleep">💤  Send to nest</div>
+        <div class="item" data-act="wake">🌅  Wake up</div>
+        <div class="sep"></div>
+        <div class="item danger" data-act="cull">🗑  Cull</div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============================ CONSOLE TAB (tmux) ========================
+       The console is just a thin wrapper around a per-hen xterm.js viewport
+       that streams a persistent tmux session. The agent CLI (codex/claude/
+       gh copilot/bash) running INSIDE tmux owns all interaction UX —
+       this UI deliberately ships zero chat/blocks/composer chrome.        -->
+  <main class="tabview" id="tab-sessions" hidden>
+    <section class="console">
+      <div class="console-head">
+        <div class="sess-tabs" id="sess-tabs"></div>
+        <div class="head-actions">
+          <select id="open-hen-select" title="Attach a hen's tmux session"></select>
+          <button class="ghost-btn" id="open-hen-btn">+ Attach</button>
+          <button class="ghost-btn" id="tmux-detach" title="Detach (Ctrl-b d)">detach</button>
+          <button class="ghost-btn" id="tmux-newwin" title="New tmux window (Ctrl-b c)">+ win</button>
+          <button class="ghost-btn" id="tmux-prevwin" title="Previous window (Ctrl-b p)">‹</button>
+          <button class="ghost-btn" id="tmux-nextwin" title="Next window (Ctrl-b n)">›</button>
+        </div>
+      </div>
+
+      <div class="tmux-stage" id="tmux-stage">
+        <div class="tmux-empty" id="tmux-empty">
+          <h2>Attach a hen to start.</h2>
+          <p>Each hen runs in a persistent <code>tmux</code> session. If the
+             hen was raised with an agent kind, that CLI launches automatically
+             on first connect — otherwise type <code>codex</code>,
+             <code>claude</code>, or <code>copilot</code> yourself.</p>
+          <p class="muted">Sessions survive page reloads and reconnects.
+             <kbd>Ctrl-b d</kbd> to detach · <kbd>Ctrl-b c</kbd> for a new window ·
+             <kbd>Ctrl-b n</kbd>/<kbd>p</kbd> to cycle windows.</p>
+        </div>
+        <div class="tmux-host" id="tmux-host"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============================== TASKS TAB ============================== -->
+  <!-- Farm-wide task queue. Each task gets routed to a matching CLI-agent
+       hen and delivered into that hen's tmux session via send-keys. -->
+  <main class="tabview" id="tab-tasks">
+    <section class="tasks-pane">
+      <div class="tasks-composer">
+        <h2>📋 Farm-wide tasks</h2>
+        <p class="muted">Submit a task — the first idle hen with a matching
+           agent kind picks it up. Use <b>Any CLI agent</b> to let the queue
+           pick whichever (claude / codex / gh-copilot) is available.</p>
+        <div class="task-row">
+          <select id="task-kind">
+            <option value="">Any CLI agent</option>
+            <option value="claude-code">claude-code</option>
+            <option value="codex">codex</option>
+            <option value="gh-copilot">gh-copilot</option>
+            <option value="shell">shell (raw)</option>
+          </select>
+          <input id="task-prompt" type="text" placeholder="e.g. summarize the README and write a one-paragraph TLDR" />
+          <button id="task-submit" class="primary">Dispatch</button>
+        </div>
+        <div class="error" id="task-error"></div>
+      </div>
+      <div class="tasks-list" id="tasks-list">
+        <div class="tasks-empty">No tasks yet.</div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============================== MARKET TAB ============================== -->
+  <main class="tabview" id="tab-market" hidden>
+    <section class="market-pane">
+      <div class="market-card">
+        <h2>🛒 Cross-coop compute market</h2>
+        <p>
+          List spare hen capacity to neighbouring coops, or rent compute from
+          them. Bid &amp; ask are exchanged over a 256-byte gossip frame on the
+          World relay; settlement is sealed-bid escrow in Grain.
+        </p>
+        <p class="muted">
+          The market layer ships in a separate repository,
+          <code>coop-market</code>, which keeps the proprietary listing /
+          escrow / federation code out of the OSS daemon (see open-core split
+          in <code>AGENTS.md</code>).
+        </p>
+        <div class="market-actions">
+          <a class="market-cta" href="https://github.com/dcluomax/coop-market" target="_blank" rel="noreferrer">
+            Open coop-market repo ↗
+          </a>
+          <span class="market-status" id="market-status">checking local market peer…</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Shell overlay -->
+  <div class="shell-overlay" id="shell-overlay">
+    <div class="shell-frame">
+      <div class="bar">
+        <span class="face" id="sh-face">🐔</span>
+        <span class="title" id="sh-title">shell</span>
+        <button class="x" id="sh-close">close (esc)</button>
+      </div>
+      <div class="term-host" id="term-host"></div>
+    </div>
+  </div>
+
+  <!-- Raise-chicken modal -->
+  <div class="modal-backdrop" id="raise-modal">
+    <div class="modal" role="dialog" aria-labelledby="raise-title">
+      <h3 id="raise-title">🥚 Raise a new chicken</h3>
+
+      <label>Sex</label>
+      <div class="sex-picker">
+        <div class="sex-card selected" data-sex="hen">
+          <div class="big">🐔</div>
+          <div class="label">Hen</div>
+          <div class="sub">lays eggs · default</div>
+        </div>
+        <div class="sex-card" data-sex="rooster">
+          <div class="big">🐓</div>
+          <div class="label">Rooster</div>
+          <div class="sub">crows at dawn</div>
+        </div>
+      </div>
+
+      <label for="f-name">Name</label>
+      <div class="name-row">
+        <input type="text" id="f-name" placeholder="e.g. aria" autocomplete="off" />
+        <button type="button" id="btn-randname" class="rand-btn" title="Random name">🎲</button>
+      </div>
+
+      <label for="f-agent">Agent runtime</label>
+      <select id="f-agent">
+        <option value="anthropic">anthropic (in-process brain · v0.1 default)</option>
+        <option value="claude-code">claude-code (CLI in tmux)</option>
+        <option value="codex">codex (CLI in tmux)</option>
+        <option value="gh-copilot">gh-copilot (CLI in tmux)</option>
+        <option value="shell">shell (raw — type the agent yourself)</option>
+      </select>
+
+      <div id="brain-fields">
+      <label for="f-model">Brain model</label>
+      <select id="f-model">
+        <option value="claude-sonnet-4-5-20250929">claude-sonnet-4.5 (default)</option>
+        <option value="claude-opus-4-5-20251001">claude-opus-4.5</option>
+        <option value="claude-haiku-4-5-20251001">claude-haiku-4.5</option>
+      </select>
+
+      <label for="f-provider">Brain provider id</label>
+      <input type="text" id="f-provider" value="vault:byok-anthropic" />
+      </div>
+
+      <label>Tools</label>
+      <div class="tools-grid">
+        <label><input type="checkbox" value="bash" checked /> bash</label>
+        <label><input type="checkbox" value="file_read" checked /> file_read</label>
+        <label><input type="checkbox" value="file_write" checked /> file_write</label>
+        <label><input type="checkbox" value="http" /> http</label>
+      </div>
+
+      <label for="f-prompt">System prompt <span style="text-transform:none;font-size:11px;color:var(--muted);font-weight:400">(optional)</span></label>
+      <textarea id="f-prompt" placeholder="You are a helpful coding assistant living in a sandboxed workdir…"></textarea>
+
+      <div class="error" id="raise-error"></div>
+
+      <div class="modal-actions">
+        <button id="btn-cancel">Cancel</button>
+        <button id="btn-submit" class="primary">🐣 Hatch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Configure modal: Farm Location + Discord connector -->
+  <div class="modal-backdrop" id="config-modal">
+    <div class="modal" role="dialog" aria-labelledby="cfg-title" style="max-width:560px">
+      <h3 id="cfg-title">⚙️ Farm settings</h3>
+
+      <div class="cfg-section">
+        <h4>📍 Farm location</h4>
+        <div id="loc-warning" class="loc-warning" hidden>
+          ⚠️ This farm is bound to <b>127.0.0.1</b> — only this device can reach it.
+          To let other devices on your LAN find the farm, restart <code>coopd</code> with
+          <code>--addr 0.0.0.0:9700</code>.
+        </div>
+        <ul class="loc-list" id="loc-list"></ul>
+        <p style="font-size:11px;color:var(--muted);margin:8px 0 0">
+          Share one of these URLs with other devices (laptops, phones, Pi flocks)
+          to point them at this farm.
+        </p>
+      </div>
+
+      <div class="cfg-section">
+        <h4>🤖 Discord connector</h4>
+        <div class="toggle-row">
+          <input type="checkbox" id="dc-enabled" />
+          <label for="dc-enabled">Enable Discord bot</label>
+        </div>
+
+        <label for="dc-token">Bot token</label>
+        <input type="password" id="dc-token" placeholder="paste from discord.com/developers" autocomplete="off" />
+
+        <label for="dc-guild">Guild (server) ID</label>
+        <input type="text" id="dc-guild" placeholder="numeric snowflake, e.g. 1234567890" autocomplete="off" />
+
+        <label for="dc-prefix">Command prefix</label>
+        <input type="text" id="dc-prefix" value="!coop" />
+
+        <label for="dc-apibase">API base (optional)</label>
+        <input type="text" id="dc-apibase" placeholder="http://127.0.0.1:9700 (default)" />
+
+        <p style="font-size:11px;color:var(--muted);margin:10px 0 0">
+          Create one Discord channel per chicken (channel name = chicken name).
+          Commands: <code>!coop &lt;prompt&gt;</code>, <code>!coop status</code>,
+          <code>!coop hatch</code>, <code>!coop sleep</code>, <code>!coop wake</code>.
+        </p>
+      </div>
+
+      <div class="error" id="cfg-error"></div>
+
+      <div class="modal-actions">
+        <button id="btn-cfg-cancel">Close</button>
+        <button id="btn-cfg-save" class="primary">💾 Save & apply</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"
+          integrity="sha384-/nfmYPUzWMS6v2atn8hbljz7NE0EI1iGx34lJaNzyVjWGDzMv+ciUZUeJpKA3Glc"
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"
+          integrity="sha384-AQLWHRKAgdTxkolJcLOELg4E9rE89CPE2xMy3tIRFn08NcGKPTsELdvKomqji+DL"
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script>
+    const API = location.origin;
+    const WS_PROTO = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let chickens = [];
+    let activeId = null;
+    let term = null, fit = null, ws = null;
+
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s).replace(/[&<>"']/g, c =>
+      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+    function chickenEmoji(c) {
+      const sex = (c.manifest && c.manifest.sex) || 'hen';
+      const state = (c.state || '').toLowerCase();
+      if (state === 'defined' || state === 'hatching') return '🥚';
+      return sex === 'rooster' ? '🐓' : '🐔';
+    }
+
+    // Full-body 2D-game-style chicken sprite (inline SVG).
+    // Hens: cream body, modest comb. Roosters: bronze body, big crown comb + tail.
+    // Each piece is its own <g> so per-state CSS can animate head/wing/legs/tail.
+    function chickenSvg(c) {
+      const sex = (c.manifest && c.manifest.sex) || 'hen';
+      const state = (c.state || '').toLowerCase();
+      if (state === 'defined' || state === 'hatching') {
+        return '<span class="body egg-emoji" data-body-key="'+sex+'|egg">🥚</span>';
+      }
+      const isRooster = sex === 'rooster';
+      const body     = isRooster ? '#b85b2a' : '#fff4d6';
+      const bodyDark = isRooster ? '#8a3a14' : '#e8d49a';
+      const belly    = isRooster ? '#d8854a' : '#ffffff';
+      const wing     = isRooster ? '#7a2f10' : '#f0d99a';
+      const comb     = '#e63b3b';
+      const combDark = '#a32020';
+      const wattle   = '#e63b3b';
+      const beak     = '#ffaf3b';
+      const beakDark = '#d18b1a';
+      const leg      = '#f5b347';
+      const legDark  = '#b07820';
+      const eye      = '#1c1c22';
+
+      // Rooster gets a larger, multi-point crown + a tall arched tail.
+      const combShape = isRooster
+        ? '<path d="M44 20 L46 9 L52 14 L56 6 L60 14 L66 10 L66 22 Z" fill="'+comb+'" stroke="'+combDark+'" stroke-width="1.2" stroke-linejoin="round"/>'
+        : '<path d="M48 18 L50 11 L54 15 L58 10 L60 18 Z" fill="'+comb+'" stroke="'+combDark+'" stroke-width="1.2" stroke-linejoin="round"/>';
+      const tailShape = isRooster
+        // tall arched rooster tail (3 feathers)
+        ? '<g class="chk-tail">'
+          + '<path d="M16 42 C 4 30, 6 12, 22 12 C 18 22, 16 30, 22 38 Z" fill="'+bodyDark+'" stroke="#000" stroke-width="0.8"/>'
+          + '<path d="M14 44 C 0 36, 4 18, 20 18 C 14 28, 14 36, 22 42 Z" fill="'+body+'" stroke="#000" stroke-width="0.8" opacity="0.95"/>'
+          + '<path d="M18 46 C 8 40, 12 26, 24 26 C 20 32, 20 38, 26 44 Z" fill="'+wing+'" stroke="#000" stroke-width="0.8"/>'
+          + '</g>'
+        // short hen tail (one tuft)
+        : '<g class="chk-tail">'
+          + '<path d="M18 40 C 8 34, 10 22, 24 22 C 20 28, 20 34, 26 40 Z" fill="'+bodyDark+'" stroke="#000" stroke-width="0.8" stroke-linejoin="round"/>'
+          + '</g>';
+
+      // viewBox 80x80. Composition: tail (back) → body → wing → head → comb → beak → wattle → legs (front-bottom)
+      return ''
+        + '<svg class="body chk-svg" data-body-key="'+sex+'|chk" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
+        +   tailShape
+        // --- body ellipse ---
+        + '  <g class="chk-body">'
+        + '    <ellipse cx="42" cy="46" rx="22" ry="18" fill="'+body+'" stroke="#000" stroke-width="1.2"/>'
+        + '    <ellipse cx="42" cy="52" rx="16" ry="10" fill="'+belly+'" opacity="0.9"/>'
+        // --- wing ---
+        + '    <g class="chk-wing">'
+        + '      <path d="M30 38 C 26 36, 22 44, 30 52 C 38 56, 46 52, 46 44 C 44 38, 36 36, 30 38 Z" '
+        + '            fill="'+wing+'" stroke="#000" stroke-width="1"/>'
+        + '      <path d="M32 42 C 34 46, 38 48, 42 48" stroke="'+bodyDark+'" stroke-width="0.8" fill="none"/>'
+        + '    </g>'
+        + '  </g>'
+        // --- head ---
+        + '  <g class="chk-head">'
+        +     combShape
+        + '    <circle cx="56" cy="26" r="13" fill="'+body+'" stroke="#000" stroke-width="1.2"/>'
+        // beak
+        + '    <path d="M68 26 L76 24 L76 30 L68 30 Z" fill="'+beak+'" stroke="'+beakDark+'" stroke-width="1" stroke-linejoin="round"/>'
+        + '    <line x1="68" y1="27" x2="76" y2="27" stroke="'+beakDark+'" stroke-width="0.6"/>'
+        // wattle
+        + '    <path d="M64 32 C 64 38, 68 38, 68 32 Z" fill="'+wattle+'" stroke="'+combDark+'" stroke-width="0.8"/>'
+        // eye
+        + '    <circle cx="60" cy="22" r="2.4" fill="'+eye+'"/>'
+        + '    <circle cx="60.8" cy="21.2" r="0.8" fill="#fff"/>'
+        + '  </g>'
+        // --- legs ---
+        + '  <g class="chk-legs">'
+        + '    <g class="chk-leg chk-leg-l">'
+        + '      <line x1="36" y1="62" x2="36" y2="72" stroke="'+leg+'" stroke-width="2.6" stroke-linecap="round"/>'
+        + '      <path d="M32 72 L40 72 M34 73 L34 75 M36 73 L36 75 M38 73 L38 75" stroke="'+legDark+'" stroke-width="1.2" stroke-linecap="round" fill="none"/>'
+        + '    </g>'
+        + '    <g class="chk-leg chk-leg-r">'
+        + '      <line x1="48" y1="62" x2="48" y2="72" stroke="'+leg+'" stroke-width="2.6" stroke-linecap="round"/>'
+        + '      <path d="M44 72 L52 72 M46 73 L46 75 M48 73 L48 75 M50 73 L50 75" stroke="'+legDark+'" stroke-width="1.2" stroke-linecap="round" fill="none"/>'
+        + '    </g>'
+        + '  </g>'
+        + '</svg>';
+    }
+
+    function stateIcon(state) {
+      const s = (state || '').toLowerCase();
+      if (s === 'working')  return '⚡';
+      if (s === 'idle')     return '😴';
+      if (s === 'hatching' || s === 'defined') return '🔨';
+      if (s === 'dormant' || s === 'sleeping' || s === 'archived') return '💤';
+      if (s === 'error')    return '⚠️';
+      return '';
+    }
+
+    async function fetchAll() {
+      try {
+        const [farmR, hensR, jobsR] = await Promise.all([
+          fetch(`${API}/api/v1/farm`),
+          fetch(`${API}/api/v1/hens`),
+          fetch(`${API}/api/v1/jobs`),
+        ]);
+        const farm = await farmR.json();
+        chickens = await hensR.json();
+        chickens.sort((a, b) => a.id.localeCompare(b.id));
+        // build job map: keep newest active job per hen
+        const jobs = jobsR.ok ? await jobsR.json() : [];
+        const next = {};
+        for (const j of jobs) {
+          const hid = j.hen_id || j.henId;
+          const stat = (j.status || '').toLowerCase();
+          if (!hid) continue;
+          if (stat === 'completed' || stat === 'failed' || stat === 'cancelled') continue;
+          if (!next[hid]) next[hid] = { prompt: j.prompt || j.input || '', status: stat };
+        }
+        // detect job completions vs lastJobs for toast
+        for (const hid in lastJobs) {
+          if (!next[hid] && lastJobs[hid]) {
+            const short = lastJobs[hid].prompt.slice(0, 36);
+            const name  = hid.split('/').pop();
+            showToast(`✅ ${name} finished: "${short}${lastJobs[hid].prompt.length>36?'…':''}"`);
+          }
+        }
+        // push completed/failed job results into per-hen chat history (once each)
+        for (const j of jobs) {
+          const hid = j.hen_id || j.henId;
+          const stat = (j.status || '').toLowerCase();
+          const jid  = j.id || j.job_id || j.jobId;
+          if (!hid || !jid) continue;
+          if (seenJobReplies.has(jid)) continue;
+          if (stat === 'completed' || stat === 'failed' || stat === 'cancelled') {
+            let body = j.result || j.output || j.error ||
+              (stat === 'completed' ? '✓ done' : stat === 'failed' ? '⚠ failed' : '🚫 cancelled');
+            body = humanizeBrainError(String(body));
+            pushChat(hid, 'hen', body.slice(0, 800),
+                     stat === 'completed' ? null : 'error');
+            seenJobReplies.add(jid);
+          }
+        }
+        lastJobs = next;
+        currentJobs = next;
+        allJobs = jobs;
+        renderTasks();
+        if (typeof refreshOpenHenSelect === 'function') refreshOpenHenSelect();
+
+        // Estimated savings: assume each successful job saves ~5 min of human work
+        // and costs ~$0.01/turn. (Heuristic, intentionally rough.)
+        try {
+          const done = jobs.filter(j => (j.status||'').toLowerCase() === 'completed');
+          const minSaved = done.length * 5;
+          const dollarsSpent = jobs.reduce((s,j) => s + ((j.turns||0) * 0.01), 0);
+          const sav = $('savings-text');
+          if (sav) sav.textContent = `$${dollarsSpent.toFixed(2)} · ${minSaved} min`;
+        } catch (_) {}
+
+        $('farm-id').textContent = `· ${farm.coop_id} · v${farm.coopd_version}`;
+        $('status-pill').classList.remove('offline');
+        $('status-text').textContent = `${farm.hen_count} chickens`;
+        renderFlock();
+        renderYard();
+        if (activeId) renderDetail(chickens.find(c => c.id === activeId));
+        refreshCmdTarget();
+      } catch (e) {
+        $('status-pill').classList.add('offline');
+        $('status-text').textContent = 'coopd unreachable';
+      }
+    }
+
+    function renderFlock() {
+      const list = $('flock-list');
+      list.innerHTML = '';
+      if (!chickens.length) {
+        list.innerHTML = `<div style="padding:14px 12px;color:var(--muted);font-size:12px">No chickens yet. Hatch one above.</div>`;
+        return;
+      }
+      for (const c of chickens) {
+        const sex = (c.manifest && c.manifest.sex) || 'hen';
+        const row = document.createElement('div');
+        row.className = 'chick' + (activeId === c.id ? ' active' : '');
+        row.innerHTML = `
+          <div class="avatar ${sex}">${chickenEmoji(c)}</div>
+          <div class="meta">
+            <div class="name">${esc(c.id.split('/').pop())}</div>
+            <div class="sub">${sex === 'rooster' ? '🐓 rooster' : '🐔 hen'} · ${esc(c.id)}</div>
+          </div>
+          <span class="badge ${c.state.toLowerCase()}">${c.state}</span>
+        `;
+        row.onclick = () => select(c.id);
+        list.appendChild(row);
+      }
+    }
+
+    /* ====================================================================
+       Farmyard scene — chickens roam as autonomous sprites with simple AI.
+       =================================================================== */
+    const sprites = {};           // id -> { el, x, y, vx, vy, facing, behavior, until, target, henState }
+    const NESTS = [
+      { rx: 0.86, ry: 0.20, occupant: null },
+      { rx: 0.10, ry: 0.22, occupant: null },
+      { rx: 0.88, ry: 0.80, occupant: null },
+      { rx: 0.12, ry: 0.82, occupant: null },
+    ];
+    // Zones the chickens visit based on activity. Workshop = work-stations
+    // arranged as 3 slots around an anvil; chickens claim one when working.
+    const ZONES = {
+      workshop: {
+        rx: 0.25, ry: 0.50, icon: '🔨', label: 'Workshop',
+        slots: [{drx:-0.04,dry:-0.06},{drx:0.04,dry:-0.06},{drx:0.00,dry:0.07}],
+        occupants: [null,null,null],
+      },
+      water:    { rx: 0.55, ry: 0.18, icon: '💧', label: 'Water'  },
+      garden:   { rx: 0.55, ry: 0.78, icon: '🌾', label: 'Garden' },
+      tree:     { rx: 0.78, ry: 0.50, icon: '🌳', label: ''       },
+    };
+    let stageW = 0, stageH = 0;
+    let currentJobs = {};      // hen_id -> {prompt, status}
+    let lastJobs   = {};       // for detecting completions
+    let allJobs    = [];       // full /jobs payload, newest-first by created_at
+    let activeTab  = 'tasks';
+    // (legacy task filters removed — see Console block filter below)
+    let isNight = false;
+    let chatHistory = {};      // hen_id -> [{who:'user'|'hen', text, status?}]
+    const seenJobReplies = new Set();
+    const CHAT_MAX = 20;
+    function pushChat(id, who, text, status) {
+      if (!id) return;
+      const arr = chatHistory[id] || (chatHistory[id] = []);
+      arr.push({ who, text, status });
+      if (arr.length > CHAT_MAX) arr.splice(0, arr.length - CHAT_MAX);
+      if (cmdTargetId === id) renderChatLog();
+    }
+    function renderChatLog() {
+      const box = $('cmd-log');
+      if (!box) return;
+      const arr = (cmdTargetId && chatHistory[cmdTargetId]) || [];
+      box.innerHTML = arr.map(m => `
+        <div class="chat-msg ${m.who}${m.status ? ' '+m.status : ''}">
+          <span class="who">${m.who === 'user' ? 'you' : '🐔'}</span>
+          <span class="body">${esc(m.text)}</span>
+        </div>`).join('');
+      box.scrollTop = box.scrollHeight;
+    }
+    function humanizeBrainError(raw) {
+      if (!raw) return raw;
+      // Anthropic 401: invalid API key
+      if (/anthropic\s+401/i.test(raw) && /invalid\s+x-api-key/i.test(raw)) {
+        return '🔑 Anthropic API key is invalid. Re-seal the vault with a valid '
+             + 'sk-ant-… key (coop vault put byok-anthropic <KEY>) and try again.';
+      }
+      if (/anthropic\s+429/i.test(raw)) {
+        return '⏳ Anthropic rate limit hit. Wait a few seconds and resend.';
+      }
+      if (/anthropic\s+5\d\d/i.test(raw)) {
+        return '☁️ Anthropic server error. Resend in a moment.';
+      }
+      // Try JSON-encoded {"error": "..."} payloads
+      try {
+        const j = JSON.parse(raw);
+        if (j && (j.error || j.message)) return String(j.error || j.message);
+      } catch (_) {}
+      return raw;
+    }
+
+    function ensureScenery() {
+      const grid = $('yard-grid');
+      if (grid.dataset.sceneReady) return;
+      grid.dataset.sceneReady = '1';
+
+      // Sky layer with sun + drifting clouds
+      const sky = document.createElement('div');
+      sky.className = 'sky-band';
+      sky.innerHTML = `
+        <div class="sun"></div>
+        <div class="cloud"           style="animation-delay: -10s;">☁️</div>
+        <div class="cloud c2"        style="animation-delay: -40s;">☁️</div>
+        <div class="cloud c3"        style="animation-delay: -65s;">☁️</div>
+      `;
+      grid.appendChild(sky);
+
+      // Big barn (top-left) + henhouse (top-right area) + silo (left of barn)
+      const barn = document.createElement('div');
+      barn.className = 'building barn';
+      barn.style.left = '20px'; barn.style.top = '34%';
+      grid.appendChild(barn);
+
+      const silo = document.createElement('div');
+      silo.className = 'building silo';
+      silo.style.left = '138px'; silo.style.top = '34%';
+      grid.appendChild(silo);
+
+      const hh = document.createElement('div');
+      hh.className = 'building henhouse';
+      hh.style.right = '20px'; hh.style.top = '38%';
+      grid.appendChild(hh);
+
+      // Big oak tree (right side near the henhouse) — actually a few
+      const tree1 = document.createElement('div');
+      tree1.className = 'tree-big';
+      tree1.textContent = '🌳';
+      tree1.style.left = '46%'; tree1.style.top = '42%';
+      grid.appendChild(tree1);
+      const tree2 = document.createElement('div');
+      tree2.className = 'tree-big';
+      tree2.textContent = '🌲';
+      tree2.style.left = '4%';  tree2.style.top = '50%';
+      tree2.style.fontSize = '52px';
+      tree2.style.animationDelay = '-3s';
+      grid.appendChild(tree2);
+
+      // Bottom fence
+      const fence = document.createElement('div');
+      fence.className = 'fence-bottom';
+      grid.appendChild(fence);
+
+      // Nests (warm wood color now blends better)
+      NESTS.forEach((n, i) => {
+        const el = document.createElement('div');
+        el.className = 'scene nest';
+        el.dataset.nest = i;
+        el.textContent = '🪺';
+        grid.appendChild(el);
+        n.el = el;
+      });
+
+      // Zones with their props
+      for (const key in ZONES) {
+        const z = ZONES[key];
+        const el = document.createElement('div');
+        el.className = 'scene zone-' + key;
+        el.textContent = z.icon;
+        if (key === 'tree')     el.style.fontSize = '0';   // hide — we already have trees
+        if (key === 'workshop') el.style.fontSize = '36px';
+        if (key === 'water')    el.style.fontSize = '0';   // hidden; pond visual below
+        if (key === 'garden')   el.style.fontSize = '0';   // hidden; plot below
+        grid.appendChild(el);
+        z.el = el;
+        if (z.label) {
+          const lb = document.createElement('div');
+          lb.className = 'zone-label';
+          lb.textContent = z.label;
+          grid.appendChild(lb);
+          z.labelEl = lb;
+        }
+        if (key === 'workshop') {
+          const ring = document.createElement('div');
+          ring.className = 'zone-ring';
+          grid.appendChild(ring);
+          z.ringEl = ring;
+        }
+      }
+
+      // Pond (covers water zone)
+      const pond = document.createElement('div');
+      pond.className = 'pond';
+      grid.appendChild(pond);
+      ZONES.water.pondEl = pond;
+
+      // Vegetable plot (covers garden zone) — 4 swaying crops
+      const plot = document.createElement('div');
+      plot.className = 'plot';
+      grid.appendChild(plot);
+      ZONES.garden.plotEl = plot;
+      const crops = ['🥕','🌽','🥬','🌾'];
+      ZONES.garden.crops = crops.map((c, i) => {
+        const el = document.createElement('div');
+        el.className = 'crop';
+        el.textContent = c;
+        el.style.animationDelay = `-${i}s`;
+        grid.appendChild(el);
+        return el;
+      });
+
+      // Scattered flowers, rocks, mushrooms — pure decor
+      const decos = [
+        ['🌼','12%','62%','22px'], ['🌷','26%','94%','22px'],
+        ['🌻','64%','94%','24px'], ['🌹','78%','88%','22px'],
+        ['🪨','38%','82%','20px'], ['🪨','86%','64%','16px'],
+        ['🍄','22%','72%','18px'], ['🌾','7%','86%','20px'],
+        ['🌿','58%','62%','20px'], ['🌿','92%','70%','18px'],
+      ];
+      decos.forEach(([t,l,top,sz]) => {
+        const el = document.createElement('div');
+        el.className = 'deco';
+        el.style.left = l; el.style.top = top; el.style.fontSize = sz;
+        el.textContent = t;
+        grid.appendChild(el);
+      });
+
+      // Two butterflies wandering forever
+      for (let i = 0; i < 2; i++) {
+        const bf = document.createElement('div');
+        bf.className = 'butterfly';
+        bf.textContent = i === 0 ? '🦋' : '🪲';
+        bf.style.left = `${rand(20, 80)}%`;
+        bf.style.top  = `${rand(35, 75)}%`;
+        grid.appendChild(bf);
+        butterflyTargets.push({ el: bf,
+          x: parseFloat(bf.style.left)/100,
+          y: parseFloat(bf.style.top)/100,
+          tx: Math.random(), ty: rand(0.35, 0.78), nextAt: 0,
+        });
+      }
+    }
+
+    const butterflyTargets = [];
+
+    function measureStage() {
+      const grid = $('yard-grid');
+      const r = grid.getBoundingClientRect();
+      stageW = Math.max(200, r.width  - 80);
+      stageH = Math.max(200, r.height - 80);
+      NESTS.forEach(n => {
+        if (!n.el) return;
+        n.x = n.rx * stageW;
+        n.y = n.ry * stageH;
+        n.el.style.left = `${n.x}px`;
+        n.el.style.top  = `${n.y}px`;
+      });
+      for (const key in ZONES) {
+        const z = ZONES[key];
+        if (!z.el) continue;
+        z.x = z.rx * stageW;
+        z.y = z.ry * stageH;
+        z.el.style.left = `${z.x}px`;
+        z.el.style.top  = `${z.y}px`;
+        if (z.labelEl) {
+          z.labelEl.style.left = `${z.x + 14}px`;
+          z.labelEl.style.top  = `${z.y + 38}px`;
+        }
+        if (z.ringEl) {
+          z.ringEl.style.left = `${z.x + 14}px`;
+          z.ringEl.style.top  = `${z.y + 14}px`;
+        }
+        if (z.slots) {
+          z.slotPos = z.slots.map(s => ({ x: z.x + s.drx*stageW, y: z.y + s.dry*stageH }));
+        }
+      }
+      // pond positioned over water zone
+      if (ZONES.water.pondEl) {
+        ZONES.water.pondEl.style.left = `${ZONES.water.x - 28}px`;
+        ZONES.water.pondEl.style.top  = `${ZONES.water.y - 6}px`;
+      }
+      // plot + crops positioned over garden zone
+      if (ZONES.garden.plotEl) {
+        ZONES.garden.plotEl.style.left = `${ZONES.garden.x - 36}px`;
+        ZONES.garden.plotEl.style.top  = `${ZONES.garden.y + 10}px`;
+      }
+      if (ZONES.garden.crops) {
+        ZONES.garden.crops.forEach((el, i) => {
+          el.style.left = `${ZONES.garden.x - 30 + i * 32}px`;
+          el.style.top  = `${ZONES.garden.y - 4}px`;
+        });
+      }
+    }
+    window.addEventListener('resize', () => { measureStage(); });
+
+    function rand(a, b) { return a + Math.random() * (b - a); }
+    function dist(ax, ay, bx, by) { const dx=ax-bx, dy=ay-by; return Math.sqrt(dx*dx+dy*dy); }
+
+    function pickWanderTarget() {
+      return { x: rand(20, stageW), y: rand(40, stageH) };
+    }
+
+    function findNearestNest(s) {
+      let best = null, bestD = Infinity;
+      for (const n of NESTS) {
+        if (n.occupant && n.occupant !== s.id) continue;
+        const d = dist(s.x, s.y, n.x, n.y);
+        if (d < bestD) { bestD = d; best = n; }
+      }
+      return best;
+    }
+
+    function releaseNest(id) {
+      for (const n of NESTS) if (n.occupant === id) n.occupant = null;
+    }
+
+    function setBehavior(s, b) {
+      if (s.behavior === b) return;
+      s.behavior = b;
+      s.el.classList.remove('b-walk', 'b-peck', 'b-sleep');
+      if (b === 'walk')  s.el.classList.add('b-walk');
+      if (b === 'peck')  s.el.classList.add('b-peck');
+      if (b === 'sleep') s.el.classList.add('b-sleep');
+    }
+
+    function claimWorkshopSlot(s) {
+      const z = ZONES.workshop;
+      if (!z.slotPos) return null;
+      // already have one?
+      const had = z.occupants.indexOf(s.id);
+      if (had >= 0) return z.slotPos[had];
+      const idx = z.occupants.indexOf(null);
+      if (idx < 0) return z.slotPos[0]; // overflow → first slot
+      z.occupants[idx] = s.id;
+      return z.slotPos[idx];
+    }
+    function releaseWorkshop(id) {
+      const z = ZONES.workshop;
+      for (let i = 0; i < z.occupants.length; i++)
+        if (z.occupants[i] === id) z.occupants[i] = null;
+    }
+
+    function chooseNextBehavior(s, now) {
+      const st = s.henState;
+      if (st !== 'working') releaseWorkshop(s.id);
+
+      // Sleeping/dormant/archived → head to a nest and crouch
+      if (st === 'sleeping' || st === 'dormant' || st === 'archived') {
+        const nest = findNearestNest(s);
+        if (nest) {
+          nest.occupant = s.id;
+          if (dist(s.x, s.y, nest.x, nest.y) < 8) {
+            setBehavior(s, 'sleep');
+            s.vx = 0; s.vy = 0; s.until = now + 8000;
+          } else {
+            s.target = { x: nest.x, y: nest.y };
+            s.until = now + 6000;
+            setBehavior(s, 'walk');
+          }
+        } else { setBehavior(s, 'sleep'); s.until = now + 8000; }
+        return;
+      }
+      releaseNest(s.id);
+
+      if (st === 'defined' || st === 'hatching' || st === 'error') {
+        setBehavior(s, null); s.vx = 0; s.vy = 0; s.until = now + 2000;
+        return;
+      }
+
+      // WORKING → go stand at workshop slot and busy-peck (and shed feathers!)
+      if (st === 'working') {
+        const slot = claimWorkshopSlot(s);
+        if (slot) {
+          if (dist(s.x, s.y, slot.x, slot.y) < 6) {
+            setBehavior(s, 'peck'); s.vx = 0; s.vy = 0;
+            s.until = now + rand(500, 900);
+            if (Math.random() < 0.35) emitFeathers(s, 2);
+          } else {
+            s.target = { x: slot.x, y: slot.y };
+            setBehavior(s, 'walk');
+            s.until = now + 4000;
+          }
+          return;
+        }
+      }
+
+      // IDLE → wander / peck / pause / drink / scratch / lay egg / preen
+      const r = Math.random();
+      if (r < 0.32) {
+        // wander to a new random spot
+        s.target = pickWanderTarget();
+        s.until = now + rand(2500, 5000);
+        setBehavior(s, 'walk');
+      } else if (r < 0.45) {
+        // walk to the pond and drink
+        const pond = ZONES.water;
+        s.target = { x: pond.x + rand(-30, 30), y: pond.y + 8 };
+        s.until = now + 4500;
+        setBehavior(s, 'walk');
+      } else if (r < 0.55) {
+        // walk to the vegetable plot to peck
+        const g = ZONES.garden;
+        s.target = { x: g.x + rand(-30, 30), y: g.y - 8 };
+        s.until = now + 4500;
+        setBehavior(s, 'walk');
+      } else if (r < 0.75) {
+        // peck in place
+        s.vx = 0; s.vy = 0;
+        setBehavior(s, 'peck');
+        s.until = now + rand(700, 1400);
+        if (Math.random() < 0.3) emitDust(s);
+        // small chance hens lay an egg
+        const sex = (s.id || '').includes('rooster') ? 'rooster' : 'hen';
+        if (sex === 'hen' && Math.random() < 0.10) {
+          emitEgg(s);
+        }
+      } else if (r < 0.86) {
+        // preen — short note
+        s.vx = 0; s.vy = 0;
+        setBehavior(s, null);
+        s.until = now + rand(1500, 2500);
+        emitNote(s);
+      } else {
+        // idle pause
+        s.vx = 0; s.vy = 0;
+        setBehavior(s, null);
+        s.until = now + rand(1500, 3500);
+      }
+    }
+
+    function tickSprite(s, dt, now) {
+      // Drive movement toward target
+      if (s.target && (s.behavior === 'walk')) {
+        const dx = s.target.x - s.x, dy = s.target.y - s.y;
+        const d = Math.sqrt(dx*dx + dy*dy);
+        const speed = (s.henState === 'working') ? 70 : 32;  // px / sec
+        if (d < 4) {
+          s.x = s.target.x; s.y = s.target.y;
+          s.target = null;
+          // arriving early shortens this state
+          s.until = Math.min(s.until, now + 200);
+        } else {
+          const step = Math.min(d, speed * dt);
+          s.x += (dx / d) * step;
+          s.y += (dy / d) * step;
+          s.facing = dx >= 0 ? 1 : -1;
+        }
+      }
+      // Pick next behavior when current one expires
+      if (now >= s.until) chooseNextBehavior(s, now);
+
+      // Z-order based on Y so bottom chickens overlap top ones
+      s.el.style.zIndex = String(2 + Math.floor(s.y));
+      s.el.style.transform = `translate3d(${s.x}px, ${s.y}px, 0)`;
+      s.el.dataset.facing = String(s.facing);
+    }
+
+    let lastFrame = 0;
+    function tickAll(ts) {
+      const dt = lastFrame ? Math.min(0.1, (ts - lastFrame) / 1000) : 0;
+      lastFrame = ts;
+      const now = ts;
+      for (const id in sprites) tickSprite(sprites[id], dt, now);
+      tickButterflies(now);
+      requestAnimationFrame(tickAll);
+    }
+    requestAnimationFrame(tickAll);
+
+    // === Particle system ===
+    function emitParticle(x, y, klass, text, opts = {}) {
+      const grid = $('yard-grid');
+      if (!grid) return;
+      const p = document.createElement('div');
+      p.className = 'particle ' + klass;
+      p.textContent = text;
+      p.style.left = `${x}px`;
+      p.style.top  = `${y}px`;
+      if (opts.dx != null) p.style.setProperty('--dx', `${opts.dx}px`);
+      grid.appendChild(p);
+      setTimeout(() => p.remove(), opts.life || 2800);
+    }
+
+    function emitFeathers(s, n = 3) {
+      for (let i = 0; i < n; i++) {
+        emitParticle(s.x + rand(10, 60), s.y + rand(0, 30),
+          'p-feather', '🪶', { dx: rand(-30, 30) });
+      }
+    }
+    function emitDust(s) {
+      emitParticle(s.x + 30, s.y + 60, 'p-dust', '💨');
+    }
+    function emitEgg(s) {
+      emitParticle(s.x + 28, s.y + 30, 'p-egg', '🥚', { life: 1700 });
+    }
+    function emitNote(s) {
+      emitParticle(s.x + 20, s.y - 5, 'p-note', '♪', { dx: rand(-20, 20) });
+    }
+    function emitHeart(s) {
+      emitParticle(s.x + 28, s.y + 10, 'p-heart', '💛', { life: 1900 });
+    }
+
+    // === Butterflies wander forever ===
+    function tickButterflies(now) {
+      for (const b of butterflyTargets) {
+        if (now > b.nextAt) {
+          b.tx = rand(0.08, 0.92);
+          b.ty = rand(0.35, 0.78);
+          b.nextAt = now + rand(2500, 5500);
+        }
+        // ease toward target
+        b.x += (b.tx - b.x) * 0.012;
+        b.y += (b.ty - b.y) * 0.012;
+        b.el.style.left = `${b.x * 100}%`;
+        b.el.style.top  = `${b.y * 100}%`;
+      }
+    }
+
+    function makeSpriteEl(c) {
+      const el = document.createElement('div');
+      el.className = 'sprite';
+      el.title = `${c.id} · ${c.state}`;
+      el.dataset.facing = '1';
+      el.innerHTML = `
+        <span class="shadow"></span>
+        <span class="job-bubble"></span>
+        <span class="bubble">${esc((c.state || '').toLowerCase())}</span>
+        <span class="state-icon">${stateIcon(c.state)}</span>
+        ${chickenSvg(c)}
+        <span class="name">${esc(c.id.split('/').pop())}</span>
+      `;
+      el.onclick = () => select(c.id);
+      el.ondblclick = (ev) => { ev.preventDefault(); openCmdBar(c.id); };
+      el.oncontextmenu = (ev) => { ev.preventDefault(); openCtxMenu(c.id, ev.clientX, ev.clientY); };
+      return el;
+    }
+
+    function renderYard() {
+      const grid = $('yard-grid');
+      const empty = $('yard-empty');
+      ensureScenery();
+      measureStage();
+      if (!chickens.length) {
+        empty.hidden = false;
+        for (const id in sprites) { sprites[id].el.remove(); delete sprites[id]; }
+        return;
+      }
+      empty.hidden = true;
+
+      const seen = new Set();
+      let anyWorking = false;
+      for (const c of chickens) {
+        seen.add(c.id);
+        const stateLower = (c.state || 'idle').toLowerCase();
+        if (stateLower === 'working') anyWorking = true;
+        let s = sprites[c.id];
+        if (!s) {
+          const el = makeSpriteEl(c);
+          grid.appendChild(el);
+          s = sprites[c.id] = {
+            id: c.id, el,
+            x: rand(40, Math.max(40, stageW)),
+            y: rand(60, Math.max(60, stageH)),
+            vx: 0, vy: 0, facing: 1,
+            behavior: null, until: 0, target: null,
+            henState: stateLower,
+          };
+          chooseNextBehavior(s, performance.now());
+        } else {
+          s.el.title = `${c.id} · ${c.state}`;
+          s.el.querySelector('.bubble').textContent = stateLower;
+          s.el.querySelector('.state-icon').textContent = stateIcon(c.state);
+          // Replace the body via outerHTML so the SVG sprite re-renders cleanly
+          // when sex/state changes (textContent= would erase the SVG).
+          const prevBody = s.el.querySelector('.body');
+          const newBodyKey = `${(c.manifest && c.manifest.sex) || 'hen'}|${stateLower === 'defined' || stateLower === 'hatching' ? 'egg' : 'chk'}`;
+          if (prevBody && prevBody.dataset.bodyKey !== newBodyKey) {
+            const tmp = document.createElement('template');
+            tmp.innerHTML = chickenSvg(c);
+            const newBody = tmp.content.firstElementChild;
+            if (newBody) {
+              newBody.dataset.bodyKey = newBodyKey;
+              prevBody.replaceWith(newBody);
+            }
+          }
+          s.el.querySelector('.name').textContent = c.id.split('/').pop();
+          if (s.henState !== stateLower) {
+            s.henState = stateLower;
+            releaseNest(s.id);
+            releaseWorkshop(s.id);
+            chooseNextBehavior(s, performance.now());
+          }
+        }
+        // job bubble (when working, show current prompt)
+        const job = currentJobs[c.id];
+        const jb = s.el.querySelector('.job-bubble');
+        if (job && job.prompt) {
+          jb.textContent = job.prompt.length > 28 ? job.prompt.slice(0, 27) + '…' : job.prompt;
+          s.el.classList.add('show-job');
+        } else {
+          s.el.classList.remove('show-job');
+        }
+
+        s.el.classList.remove('s-idle','s-working','s-hatching','s-defined','s-dormant','s-sleeping','s-archived','s-error');
+        s.el.classList.add('s-' + stateLower);
+        s.el.classList.toggle('active', activeId === c.id);
+        s.el.classList.toggle('show-bubble', stateLower === 'working' && !job);
+      }
+      // workshop ring glows when any chicken is working
+      if (ZONES.workshop.ringEl)
+        ZONES.workshop.ringEl.classList.toggle('active', anyWorking);
+
+      for (const id in sprites) {
+        if (!seen.has(id)) {
+          releaseNest(id);
+          releaseWorkshop(id);
+          sprites[id].el.remove();
+          delete sprites[id];
+        }
+      }
+    }
+
+    function select(id) {
+      activeId = id;
+      const c = chickens.find(x => x.id === id);
+      renderFlock(); renderYard();
+      renderDetail(c);
+      $('detail-card').classList.add('open');
+      const s = sprites[id];
+      if (s) emitHeart(s);
+    }
+
+    function renderDetail(c) {
+      if (!c) return;
+      const sex = (c.manifest && c.manifest.sex) || 'hen';
+      const kind = (c.manifest && c.manifest.agent_kind) || 'anthropic';
+      $('dc-face').textContent  = chickenEmoji(c);
+      $('dc-name').textContent  = c.id.split('/').pop();
+      $('dc-id').textContent    = c.id;
+      const badge = $('dc-state');
+      badge.textContent = c.state;
+      badge.className = `badge ${c.state.toLowerCase()}`;
+      $('dc-sex').textContent   = sex === 'rooster' ? '🐓 rooster' : '🐔 hen';
+      $('dc-brain').textContent = kind === 'anthropic'
+        ? `${c.manifest.brain.model} via ${c.manifest.brain.provider_id}`
+        : `agent: ${kind} (tmux)`;
+      $('dc-tools').innerHTML   = (c.manifest.tools || [])
+        .map(t => `<span>${esc(t)}</span>`).join('');
+      const stats = c.stats || {};
+      $('dc-xp').textContent    = `${stats.xp || 0} / lvl ${stats.level || 0}`;
+      $('dc-grain').textContent = `${stats.grain_earned || 0} 🪙`;
+      $('dc-created').textContent = (c.created_at || '').replace('T', ' ').replace(/\..*$/, ' UTC');
+      renderLoginPanel(c.id, kind, c.manifest.brain.provider_id);
+    }
+
+    // ===== Per-hen login / auth helpers =====
+    // Each agent kind has different login mechanics:
+    //   anthropic  → set API key into the vault (then jobs can run)
+    //   claude-code→ inside tmux: `claude /login`
+    //   codex      → inside tmux: `codex login`
+    //   gh-copilot → inside tmux: `gh auth login`
+    //   shell      → nothing
+    function renderLoginPanel(henId, kind, providerId) {
+      const wrap   = $('dc-login');
+      const row    = $('dc-login-actions');
+      const vrow   = $('dc-vault-row');
+      row.innerHTML = '';
+      vrow.hidden = true;
+      const sessionHints = {
+        'claude-code': [{label: '🔑 claude /login',  keys: 'claude', then: '/login'}],
+        'codex'      : [{label: '🔑 codex login',     keys: 'codex login'}],
+        'gh-copilot' : [{label: '🔑 gh auth login',   keys: 'gh auth login'}],
+      };
+      if (sessionHints[kind]) {
+        wrap.hidden = false;
+        for (const h of sessionHints[kind]) {
+          const b = document.createElement('button');
+          b.textContent = h.label;
+          b.onclick = async () => {
+            await fetch(`${API}/api/v1/hens/${encodeURIComponent(henId)}/shell/send`, {
+              method: 'POST',
+              headers: {'content-type':'application/json'},
+              body: JSON.stringify({keys: h.keys}),
+            }).catch(()=>{});
+            // For claude /login, second send-keys after a short delay.
+            if (h.then) setTimeout(() => {
+              fetch(`${API}/api/v1/hens/${encodeURIComponent(henId)}/shell/send`, {
+                method: 'POST',
+                headers: {'content-type':'application/json'},
+                body: JSON.stringify({keys: h.then}),
+              }).catch(()=>{});
+            }, 700);
+            switchTab('sessions'); attachTmuxTab(henId);
+          };
+          row.appendChild(b);
+        }
+        // Always-available "jump to session" button.
+        const jump = document.createElement('button');
+        jump.textContent = '↗ Open tmux';
+        jump.onclick = () => { switchTab('sessions'); attachTmuxTab(henId); };
+        row.appendChild(jump);
+      } else if (kind === 'anthropic') {
+        wrap.hidden = false;
+        // Vault key form for built-in Anthropic brain.
+        const secretName = (providerId || '').startsWith('vault:')
+          ? providerId.slice('vault:'.length) : 'byok-anthropic';
+        const label = document.createElement('span');
+        label.style.fontSize = '11px'; label.style.color = 'var(--muted)';
+        label.textContent = `vault secret: ${secretName}`;
+        row.appendChild(label);
+        vrow.hidden = false;
+        $('dc-vault-key').value = '';
+        $('dc-vault-save').onclick = async () => {
+          const val = $('dc-vault-key').value.trim();
+          if (!val) return;
+          const r = await fetch(`${API}/api/v1/vault/secrets`, {
+            method: 'PUT',
+            headers: {'content-type':'application/json'},
+            body: JSON.stringify({name: secretName, value: val}),
+          });
+          if (r.ok) {
+            $('dc-vault-key').value = '';
+            toast(`🔑 ${secretName} saved`);
+          } else {
+            toast(`vault put failed: ${r.status}`);
+          }
+        };
+      } else {
+        // shell kind — nothing to log in to
+        wrap.hidden = true;
+      }
+    }
+
+    $('dc-close').onclick = () => {
+      $('detail-card').classList.remove('open');
+      activeId = null;
+      renderFlock(); renderYard();
+    };
+
+    $('dc-shell').onclick = () => activeId && openShell(activeId);
+    $('dc-chat').onclick  = () => activeId && openCmdBar(activeId);
+    $('dc-sleep').onclick = async () => activeId &&
+      callAndRefresh(`/api/v1/hens/${encodeURIComponent(activeId)}/sleep`, 'POST');
+    $('dc-wake').onclick  = async () => activeId &&
+      callAndRefresh(`/api/v1/hens/${encodeURIComponent(activeId)}/wake`, 'POST');
+    $('dc-delete').onclick = async () => {
+      if (!activeId) return;
+      if (!confirm(`Cull ${activeId}? This deletes the chicken permanently.`)) return;
+      await fetch(`${API}/api/v1/hens/${encodeURIComponent(activeId)}`, { method: 'DELETE' });
+      $('dc-close').click();
+      fetchAll();
+    };
+    async function callAndRefresh(path, method) {
+      await fetch(API + path, { method }); fetchAll();
+    }
+
+    // === Shell overlay ===
+    function openShell(id) {
+      if (ws) { try { ws.close(); } catch {} }
+      const c = chickens.find(x => x.id === id);
+      $('sh-face').textContent = c ? chickenEmoji(c) : '🐔';
+      $('sh-title').textContent = `shell · ${id}`;
+      $('shell-overlay').classList.add('open');
+
+      if (term) term.dispose();
+      term = new Terminal({
+        fontFamily: 'ui-monospace, Menlo, Consolas, "Liberation Mono", monospace',
+        fontSize: 13,
+        theme: { background: '#000000', foreground: '#e8eaed', cursor: '#ffce5c' },
+        cursorBlink: true,
+        scrollback: 5000,
+      });
+      fit = new FitAddon.FitAddon();
+      term.loadAddon(fit);
+      const host = $('term-host'); host.innerHTML = '';
+      term.open(host); fit.fit();
+
+      ws = new WebSocket(`${WS_PROTO}//${location.host}/api/v1/hens/${encodeURIComponent(id)}/shell`);
+      ws.binaryType = 'arraybuffer';
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        term.focus();
+      };
+      ws.onmessage = (ev) => {
+        if (typeof ev.data === 'string') {
+          try {
+            const j = JSON.parse(ev.data);
+            if (j.type === 'exit')  term.writeln(`\r\n\x1b[33m[shell exited code=${j.code}]\x1b[0m`);
+            else if (j.type === 'error') term.writeln(`\r\n\x1b[31m[error: ${j.message}]\x1b[0m`);
+          } catch {}
+        } else term.write(new Uint8Array(ev.data));
+      };
+      ws.onclose = () => term && term.writeln('\r\n\x1b[90m[connection closed]\x1b[0m');
+      ws.onerror = () => term && term.writeln('\r\n\x1b[31m[ws error]\x1b[0m');
+      term.onData(d => { if (ws && ws.readyState === 1) ws.send(new TextEncoder().encode(d)); });
+      term.onResize(({cols, rows}) => {
+        if (ws && ws.readyState === 1) ws.send(JSON.stringify({type:'resize', cols, rows}));
+      });
+      window.addEventListener('resize', () => fit && fit.fit());
+    }
+    function closeShell() {
+      if (ws) { try { ws.close(); } catch {} ws = null; }
+      $('shell-overlay').classList.remove('open');
+    }
+    $('sh-close').onclick = closeShell;
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        if ($('shell-overlay').classList.contains('open')) closeShell();
+        else if ($('raise-modal').classList.contains('open')) closeModal();
+      }
+    });
+
+    // === Live updates ===
+    // Event-sourced diff: WS messages carry typed events. We apply targeted
+    // mutations to in-memory state and only fall back to a full fetch when
+    // we receive a structural change (HenCreated/HenDeleted) or a parse error.
+    let lastFullFetch = 0;
+    function applyEvent(ev) {
+      try {
+        const t = ev.type;
+        if (t === 'hen_state_changed') {
+          const c = chickens.find(x => x.id === ev.id);
+          if (!c) { fetchAll(); return; }
+          c.state = ev.to;
+          renderFlock();
+          renderYard();
+          if (activeId === ev.id) renderDetail(c);
+          showToast(`🐔 ${ev.id.split('/').pop()}: ${ev.from} → ${ev.to}`);
+          return;
+        }
+        if (t === 'job_status_changed') {
+          // Lightweight: just update savings + status pill; full job table
+          // refresh on the next scheduled tick.
+          if (ev.status === 'completed' || ev.status === 'failed' || ev.status === 'cancelled') {
+            fetchAll();
+          }
+          return;
+        }
+        if (t === 'job_submitted' || t === 'hen_created' || t === 'hen_deleted' || t === 'shutting_down') {
+          fetchAll();
+          return;
+        }
+        // Unknown event type — be safe and resync.
+        fetchAll();
+      } catch (_) {
+        fetchAll();
+      }
+    }
+    function attachWatch() {
+      const w = new WebSocket(`${WS_PROTO}//${location.host}/api/v1/watch`);
+      w.onmessage = (msg) => {
+        try {
+          const ev = JSON.parse(msg.data);
+          applyEvent(ev);
+        } catch (_) {
+          fetchAll();
+        }
+      };
+      w.onclose = () => setTimeout(attachWatch, 2000);
+    }
+    fetchAll(); attachWatch();
+    // Safety-net background sync every 30s (was 4s — WS events now drive UI).
+    setInterval(fetchAll, 30000);
+
+    // ==========================================================
+    //  Top-tab nav (Tasks / Sessions / Agents / Market)
+    // ==========================================================
+    function switchTab(name) {
+      activeTab = name;
+      for (const btn of document.querySelectorAll('.topnav .navtab')) {
+        btn.classList.toggle('active', btn.dataset.tab === name);
+      }
+      $('tab-tasks').hidden    = name !== 'tasks';
+      $('tab-sessions').hidden = name !== 'sessions';
+      $('tab-agents').hidden   = name !== 'agents';
+      $('tab-market').hidden   = name !== 'market';
+      if (name === 'tasks')    refreshTasks();
+      if (name === 'sessions') { refreshOpenHenSelect(); renderTmuxTabs(); if (activeTmuxHen) { const t = tmuxTabs[activeTmuxHen]; setTimeout(() => { try { t.fit.fit(); } catch(_){} t.term.focus(); }, 50); } }
+      if (name === 'agents')   { measureStage(); renderYard(); }
+      if (name === 'market')   refreshMarketStatus();
+    }
+    for (const btn of document.querySelectorAll('.topnav .navtab')) {
+      btn.onclick = () => switchTab(btn.dataset.tab);
+    }
+    activeTab = 'tasks';
+    $('tab-tasks').hidden    = false;
+    $('tab-sessions').hidden = true;
+    $('tab-agents').hidden   = true;
+    $('tab-market').hidden   = true;
+    document.querySelector('.topnav .navtab[data-tab="tasks"]').classList.add('active');
+
+    // ==========================================================
+    //  Console tab — per-hen tmux stream (no chrome; agent CLI owns UX)
+    // ==========================================================
+    // tmuxTabs[henId] = { term, fit, ws, host, ro }
+    const tmuxTabs = {};
+    let activeTmuxHen = null;
+
+    function refreshOpenHenSelect() {
+      const sel = $('open-hen-select');
+      if (!sel) return;
+      const open = new Set(Object.keys(tmuxTabs));
+      const candidates = chickens.filter(c => !open.has(c.id));
+      sel.innerHTML = candidates.length
+        ? candidates.map(c => `<option value="${esc(c.id)}">${chickenEmoji(c)} ${esc(c.id.split('/').pop())} · ${esc((c.state||'').toLowerCase())}</option>`).join('')
+        : '<option value="">(all hens attached — hatch one in Agents)</option>';
+    }
+
+    function renderTmuxTabs() {
+      const root = $('sess-tabs');
+      if (!root) return;
+      const ids = Object.keys(tmuxTabs);
+      if (!ids.length) {
+        root.innerHTML = '<span class="sess" style="color:var(--muted)">no tmux sessions — attach a hen →</span>';
+        return;
+      }
+      root.innerHTML = ids.map(id => {
+        const c = chickens.find(x => x.id === id);
+        const emoji = c ? chickenEmoji(c) : '🐔';
+        const name  = id.split('/').pop();
+        return `<span class="sess ${id === activeTmuxHen ? 'active' : ''}" data-id="${esc(id)}">
+                  ${emoji} <span class="sess-name">${esc(name)}</span>
+                  <span class="x" data-close="${esc(id)}">×</span>
+                </span>`;
+      }).join('');
+      for (const el of root.querySelectorAll('.sess[data-id]')) {
+        el.onclick = (ev) => {
+          if (ev.target.dataset.close) {
+            closeTmuxTab(ev.target.dataset.close);
+          } else {
+            focusTmuxTab(el.dataset.id);
+          }
+        };
+      }
+    }
+
+    function showTmuxEmpty(show) {
+      $('tmux-empty').hidden = !show;
+      $('tmux-host').hidden  =  show;
+    }
+
+    function focusTmuxTab(henId) {
+      const t = tmuxTabs[henId];
+      if (!t) return;
+      activeTmuxHen = henId;
+      showTmuxEmpty(false);
+      // Move this hen's xterm host into the stage
+      const stageHost = $('tmux-host');
+      stageHost.innerHTML = '';
+      stageHost.appendChild(t.host);
+      try { t.fit.fit(); } catch (_) {}
+      t.term.focus();
+      renderTmuxTabs();
+    }
+
+    function attachTmuxTab(henId) {
+      if (tmuxTabs[henId]) { focusTmuxTab(henId); return; }
+      const host = document.createElement('div');
+      host.style.width = '100%'; host.style.height = '100%';
+      const term = new Terminal({
+        fontFamily: 'ui-monospace, Menlo, Consolas, "Liberation Mono", monospace',
+        fontSize: 13,
+        theme: { background: '#000000', foreground: '#e8eaed', cursor: '#ffce5c' },
+        cursorBlink: true, scrollback: 10000,
+      });
+      const fit = new FitAddon.FitAddon();
+      term.loadAddon(fit);
+      // Open against a detached host first; we'll move it into the stage in
+      // focusTmuxTab() so size measurements work.
+      const stageHost = $('tmux-host');
+      stageHost.innerHTML = '';
+      stageHost.appendChild(host);
+      term.open(host);
+      try { fit.fit(); } catch (_) {}
+
+      const sws = new WebSocket(`${WS_PROTO}//${location.host}/api/v1/hens/${encodeURIComponent(henId)}/shell`);
+      sws.binaryType = 'arraybuffer';
+      sws.onopen = () => {
+        sws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        term.focus();
+      };
+      sws.onmessage = (ev) => {
+        if (typeof ev.data === 'string') {
+          try {
+            const j = JSON.parse(ev.data);
+            if (j.type === 'exit')  term.writeln(`\r\n\x1b[33m[tmux exited code=${j.code}]\x1b[0m`);
+            else if (j.type === 'error') term.writeln(`\r\n\x1b[31m[error: ${j.message}]\x1b[0m`);
+          } catch (_) {}
+        } else term.write(new Uint8Array(ev.data));
+      };
+      sws.onclose = () => term && term.writeln('\r\n\x1b[90m[detached — reattach to resume]\x1b[0m');
+      sws.onerror = () => term && term.writeln('\r\n\x1b[31m[ws error]\x1b[0m');
+      term.onData(d => { if (sws.readyState === 1) sws.send(new TextEncoder().encode(d)); });
+      term.onResize(({cols, rows}) => {
+        if (sws.readyState === 1) sws.send(JSON.stringify({type:'resize', cols, rows}));
+      });
+      const ro = new ResizeObserver(() => { try { fit.fit(); } catch (_) {} });
+      ro.observe(host);
+
+      tmuxTabs[henId] = { term, fit, ws: sws, host, ro };
+      activeTmuxHen = henId;
+      showTmuxEmpty(false);
+      renderTmuxTabs();
+      refreshOpenHenSelect();
+      // Fit several times as the layout / fonts settle so tmux gets a
+      // resize event that matches the actual viewport, not the initial
+      // pre-layout 80×24 default.
+      const refit = () => {
+        try {
+          fit.fit();
+          if (sws.readyState === 1) sws.send(JSON.stringify({type:'resize', cols: term.cols, rows: term.rows}));
+        } catch (_) {}
+      };
+      setTimeout(refit, 30);
+      setTimeout(refit, 150);
+      setTimeout(refit, 500);
+    }
+
+    function closeTmuxTab(henId) {
+      const t = tmuxTabs[henId];
+      if (!t) return;
+      try { t.ws.close(); } catch (_) {}
+      try { t.term.dispose(); } catch (_) {}
+      try { t.ro.disconnect(); } catch (_) {}
+      delete tmuxTabs[henId];
+      const ids = Object.keys(tmuxTabs);
+      if (activeTmuxHen === henId) {
+        activeTmuxHen = ids[0] || null;
+        if (activeTmuxHen) focusTmuxTab(activeTmuxHen);
+        else { $('tmux-host').innerHTML = ''; showTmuxEmpty(true); }
+      }
+      renderTmuxTabs();
+      refreshOpenHenSelect();
+    }
+
+    // Send tmux prefix (Ctrl-b) + key to the active session
+    function tmuxKey(k) {
+      const t = activeTmuxHen && tmuxTabs[activeTmuxHen];
+      if (!t || t.ws.readyState !== 1) return;
+      const buf = new TextEncoder().encode('\x02' + k);
+      t.ws.send(buf);
+    }
+
+    $('open-hen-btn').onclick = () => {
+      const id = $('open-hen-select').value;
+      if (id) attachTmuxTab(id);
+    };
+    $('tmux-detach').onclick  = () => tmuxKey('d');
+    $('tmux-newwin').onclick  = () => tmuxKey('c');
+    $('tmux-prevwin').onclick = () => tmuxKey('p');
+    $('tmux-nextwin').onclick = () => tmuxKey('n');
+    window.addEventListener('resize', () => {
+      const t = activeTmuxHen && tmuxTabs[activeTmuxHen];
+      if (!t) return;
+      try {
+        t.fit.fit();
+        if (t.ws.readyState === 1) t.ws.send(JSON.stringify({type:'resize', cols: t.term.cols, rows: t.term.rows}));
+      } catch (_) {}
+    });
+
+    // Stub kept so other code paths that reference renderTasks() are no-ops.
+    function renderTasks() { /* tmux owns its own UI */ }
+
+    // Initial paint
+    refreshOpenHenSelect();
+    renderTmuxTabs();
+    showTmuxEmpty(true);
+
+    // ==========================================================
+    //  Market tab — probe for a sibling coop-market daemon
+    // ==========================================================
+    async function refreshMarketStatus() {
+      const el = $('market-status');
+      if (!el) return;
+      el.textContent = 'checking local market peer…';
+      try {
+        const r = await fetch(`${API}/api/v1/market/peers`, { method: 'GET' });
+        if (r.ok) {
+          const j = await r.json().catch(() => null);
+          const n = Array.isArray(j) ? j.length : (j && j.peers && j.peers.length) || 0;
+          el.textContent = `✅ market peer connected · ${n} known coop${n===1?'':'s'}`;
+          el.style.color = 'var(--accent-2)';
+        } else {
+          el.textContent = '◌ no local market peer (run coop-market alongside coopd)';
+          el.style.color = 'var(--muted)';
+        }
+      } catch (_) {
+        el.textContent = '◌ no local market peer (run coop-market alongside coopd)';
+        el.style.color = 'var(--muted)';
+      }
+    }
+
+    // ==========================================================
+    //  Game interactions: command bar, context menu, drag, day/night
+    // ==========================================================
+    let cmdTargetId = null;
+
+    function showToast(msg) {
+      const t = $('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      clearTimeout(showToast._t);
+      showToast._t = setTimeout(() => t.classList.remove('show'), 3200);
+    }
+
+    function openCmdBar(id) {
+      const c = chickens.find(x => x.id === id);
+      if (!c) return;
+      cmdTargetId = id;
+      activeId = id;
+      const name = id.split('/').pop();
+      const st = (c.state || 'idle').toLowerCase();
+      $('cmd-target').innerHTML =
+        `${chickenEmoji(c)} ${esc(name)} <span class="state-tag s-${st}">${st}</span>`;
+      $('cmd-bar').classList.add('open');
+      renderChatLog();
+      setTimeout(() => $('cmd-input').focus(), 50);
+      renderFlock(); renderYard();
+    }
+    function refreshCmdTarget() {
+      if (!cmdTargetId) return;
+      const c = chickens.find(x => x.id === cmdTargetId);
+      if (!c) return;
+      const name = cmdTargetId.split('/').pop();
+      const st = (c.state || 'idle').toLowerCase();
+      $('cmd-target').innerHTML =
+        `${chickenEmoji(c)} ${esc(name)} <span class="state-tag s-${st}">${st}</span>`;
+    }
+    function closeCmdBar() {
+      cmdTargetId = null;
+      $('cmd-bar').classList.remove('open');
+      $('cmd-input').value = '';
+    }
+    async function sendTask(prompt) {
+      if (!cmdTargetId || !prompt.trim()) return;
+      const id = cmdTargetId;
+      const name = id.split('/').pop();
+      const text = prompt.trim();
+      pushChat(id, 'user', text);
+      $('cmd-input').value = '';
+      pushChat(id, 'hen', '… working', 'queued');
+      try {
+        const r = await fetch(`${API}/api/v1/hens/${encodeURIComponent(id)}/jobs`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ prompt: text }),
+        });
+        // drop the placeholder "… working" we just pushed
+        const arr = chatHistory[id]; if (arr && arr.length) arr.pop();
+        if (r.ok || r.status === 202) {
+          showToast(`📋 Task sent to ${name}`);
+          pushChat(id, 'hen', '… working', 'queued');
+          currentJobs[id] = { prompt: text, status: 'queued' };
+          const s = sprites[id];
+          if (s) {
+            s.el.querySelector('.job-bubble').textContent =
+              text.length > 28 ? text.slice(0,27)+'…' : text;
+            s.el.classList.add('show-job');
+          }
+          setTimeout(fetchAll, 600);
+        } else {
+          const raw = await r.text();
+          let msg = raw || r.statusText;
+          try { const j = JSON.parse(raw); msg = j.error || j.message || raw; } catch (_) {}
+          pushChat(id, 'hen', `⚠️ ${msg}`, 'error');
+          showToast(`⚠️ ${name}: ${msg}`);
+        }
+      } catch (e) {
+        const arr = chatHistory[id]; if (arr && arr.length) arr.pop();
+        pushChat(id, 'hen', `⚠️ Network error: ${e.message}`, 'error');
+        showToast(`⚠️ Network error: ${e.message}`);
+      }
+    }
+    $('cmd-close').onclick = closeCmdBar;
+    $('cmd-send').onclick  = () => sendTask($('cmd-input').value);
+    $('cmd-input').addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); sendTask(ev.target.value); }
+      if (ev.key === 'Escape') closeCmdBar();
+    });
+    $('cmd-chips').addEventListener('click', (ev) => {
+      const chip = ev.target.closest('.chip');
+      if (!chip) return;
+      $('cmd-input').value = chip.dataset.prompt;
+      sendTask(chip.dataset.prompt);
+    });
+
+    // Context menu ------------------------------------------------------
+    let ctxTargetId = null;
+    const ctxMenu = $('ctx-menu');
+    function openCtxMenu(id, x, y) {
+      ctxTargetId = id;
+      ctxMenu.style.left = `${x}px`;
+      ctxMenu.style.top  = `${y}px`;
+      ctxMenu.classList.add('open');
+    }
+    function closeCtxMenu() {
+      ctxMenu.classList.remove('open');
+      ctxTargetId = null;
+    }
+    document.addEventListener('click', (ev) => {
+      if (!ev.target.closest('#ctx-menu')) closeCtxMenu();
+    });
+    ctxMenu.addEventListener('click', async (ev) => {
+      const item = ev.target.closest('.item');
+      if (!item || !ctxTargetId) return;
+      const id = ctxTargetId;
+      const act = item.dataset.act;
+      closeCtxMenu();
+      const c = chickens.find(x => x.id === id);
+      if (act === 'task')    return openCmdBar(id);
+      if (act === 'inspect') return select(id);
+      if (act === 'shell')   { select(id); $('dc-shell').click(); return; }
+      if (act === 'sleep')   { await fetch(`${API}/api/v1/hens/${encodeURIComponent(id)}/sleep`, {method:'POST'}); return fetchAll(); }
+      if (act === 'wake')    { await fetch(`${API}/api/v1/hens/${encodeURIComponent(id)}/wake`,  {method:'POST'}); return fetchAll(); }
+      if (act === 'cull')    {
+        if (!confirm(`Cull ${id.split('/').pop()}?`)) return;
+        await fetch(`${API}/api/v1/hens/${encodeURIComponent(id)}`, {method:'DELETE'});
+        return fetchAll();
+      }
+    });
+
+    // Day / night toggle -------------------------------------------------
+    $('day-toggle').onclick = () => {
+      isNight = !isNight;
+      $('yard-grid').classList.toggle('night', isNight);
+      $('day-toggle').textContent = isNight ? '🌙' : '☀️';
+    };
+
+    // === Raise modal ===
+    const modal = $('raise-modal');
+    const errBox = $('raise-error');
+    let selectedSex = 'hen';
+    document.querySelectorAll('.sex-card').forEach(card => {
+      card.onclick = () => {
+        document.querySelectorAll('.sex-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        selectedSex = card.dataset.sex;
+      };
+    });
+    function openModal() {
+      errBox.textContent = '';
+      $('f-name').value = randomChickenName();
+      $('f-prompt').value = '';
+      selectedSex = 'hen';
+      document.querySelectorAll('.sex-card').forEach(c =>
+        c.classList.toggle('selected', c.dataset.sex === 'hen'));
+      modal.classList.add('open');
+      setTimeout(() => { $('f-name').focus(); $('f-name').select(); }, 30);
+    }
+    function closeModal() { modal.classList.remove('open'); }
+    $('btn-raise').onclick = openModal;
+    $('btn-cancel').onclick = closeModal;
+    modal.onclick = e => { if (e.target === modal) closeModal(); };
+    $('btn-randname').onclick = () => {
+      const btn = $('btn-randname');
+      btn.classList.remove('spinning');
+      void btn.offsetWidth;
+      btn.classList.add('spinning');
+      $('f-name').value = randomChickenName();
+      $('f-name').focus(); $('f-name').select();
+      errBox.textContent = '';
+    };
+
+    // === Random chicken name generator ===
+    // Format: <adjective>-<noun>  or  <noun><digits>  (matches /^[a-z][a-z0-9-]{0,30}$/)
+    const NAME_ADJ = [
+      'plucky','sassy','grumpy','feathered','sleepy','noisy','dapper',
+      'bouncy','clucky','tiny','bold','fancy','fluffy','speedy','wise',
+      'lazy','jolly','witty','sneaky','brave','quiet','funky','sunny',
+      'rusty','cosmic','royal','pickled','peppered','salty','spicy','golden',
+      'silver','rosy','minty','curious','grumbling','dramatic','strutting',
+    ];
+    const NAME_NOUN = [
+      'aria','nugget','biscuit','pepper','clover','daisy','poppy','olive',
+      'mango','noodle','waffle','pancake','muffin','dumpling','cookie','toast',
+      'pickle','bean','peanut','jellybean','marshmallow','butter','cinnamon',
+      'mochi','tofu','sushi','ramen','miso','soba','udon','ginger',
+      'sage','thyme','basil','rosemary','parsley','cilantro','saffron',
+      'henrietta','cleo','beatrix','matilda','penelope','agatha','margot',
+      'kiwi','plum','cherry','berry','melon','peach','apricot',
+      'comet','nova','pixel','byte','nibble','quark','glitch','widget',
+    ];
+    function randomChickenName() {
+      const r = Math.random();
+      if (r < 0.6) {
+        const a = NAME_ADJ[Math.floor(Math.random() * NAME_ADJ.length)];
+        const n = NAME_NOUN[Math.floor(Math.random() * NAME_NOUN.length)];
+        return `${a}-${n}`;
+      }
+      if (r < 0.9) {
+        const n = NAME_NOUN[Math.floor(Math.random() * NAME_NOUN.length)];
+        return `${n}-${Math.floor(Math.random() * 90 + 10)}`;
+      }
+      const a = NAME_ADJ[Math.floor(Math.random() * NAME_ADJ.length)];
+      return `${a}-${Math.floor(Math.random() * 900 + 100)}`;
+    }
+
+    // Hide brain fields when the agent is a tmux-driven CLI (those agents
+    // own their own auth + model selection).
+    function syncAgentFields() {
+      const k = $('f-agent').value;
+      const isBrain = (k === 'anthropic');
+      $('brain-fields').style.display = isBrain ? '' : 'none';
+    }
+    $('f-agent').addEventListener('change', syncAgentFields);
+    syncAgentFields();
+
+    $('btn-submit').onclick = async () => {
+      const name = $('f-name').value.trim();
+      if (!/^[a-z][a-z0-9-]{0,30}$/.test(name)) {
+        errBox.textContent = 'Name must be lowercase, start with a letter, ≤31 chars, [a-z0-9-].';
+        return;
+      }
+      const agentKind = $('f-agent').value;
+      const model = $('f-model').value;
+      const provider = $('f-provider').value.trim() || 'vault:byok-anthropic';
+      const tools = [...document.querySelectorAll('.tools-grid input:checked')].map(el => el.value);
+      const prompt = $('f-prompt').value.trim();
+      // For tmux-driven CLI agents the brain section is still emitted with
+      // placeholder values to keep the schema simple — the validator skips
+      // the brain check when agent_kind != anthropic.
+      const lines = [
+        `spec_version: coop/v1`,
+        `name: ${name}`,
+        `sex: ${selectedSex}`,
+        `agent_kind: ${agentKind}`,
+        `brain:`,
+        `  provider_id: ${agentKind === 'anthropic' ? provider : 'vault:unused'}`,
+        `  model: ${agentKind === 'anthropic' ? model : 'unused'}`,
+        `tools: [${tools.join(', ')}]`,
+      ];
+      if (prompt) { lines.push(`personality:`); lines.push(`  system_prompt: ${JSON.stringify(prompt)}`); }
+      errBox.textContent = '…hatching…';
+      try {
+        const r = await fetch(`${API}/api/v1/hens`, {
+          method: 'POST', headers: {'content-type':'application/yaml'},
+          body: lines.join('\n') + '\n',
+        });
+        if (!r.ok) throw new Error(`create failed: ${r.status} ${await r.text()}`);
+        const created = (await r.json()).replace(/^"|"$/g, '');
+        const h = await fetch(`${API}/api/v1/hens/${encodeURIComponent(created)}/hatch`, {method:'POST'});
+        if (!h.ok) throw new Error(`hatch failed: ${h.status} ${await h.text()}`);
+        closeModal(); fetchAll();
+        // Auto-jump to Sessions tab so the user can complete login for the
+        // new CLI agent.
+        if (agentKind !== 'anthropic') {
+          setTimeout(() => {
+            switchTab('sessions');
+            attachTmuxTab(created);
+          }, 200);
+        }
+      } catch (e) {
+        errBox.textContent = e.message || String(e);
+      }
+    };
+
+    // ===== Config modal (Farm location + Discord) =====
+    const cfgModal = $('config-modal');
+    const cfgErr   = $('cfg-error');
+
+    function openCfg()  { cfgModal.classList.add('open'); cfgErr.textContent=''; loadCfg(); }
+    function closeCfg() { cfgModal.classList.remove('open'); }
+
+    $('btn-config').onclick    = openCfg;
+    $('btn-cfg-cancel').onclick = closeCfg;
+    cfgModal.addEventListener('click', e => { if (e.target === cfgModal) closeCfg(); });
+
+    async function loadCfg() {
+      // Farm location.
+      try {
+        const loc = await (await fetch(`${API}/api/v1/farm/location`)).json();
+        $('loc-warning').hidden = !loc.loopback_only;
+        const ul = $('loc-list'); ul.innerHTML = '';
+        for (const u of loc.urls) {
+          const li = document.createElement('li');
+          li.className = 'scope-' + u.scope;
+          li.innerHTML = `<span class="lbl">${esc(u.label)}</span>` +
+                         `<span class="url">${esc(u.url)}</span>` +
+                         `<button class="copy">copy</button>`;
+          li.querySelector('.copy').onclick = async () => {
+            try { await navigator.clipboard.writeText(u.url);
+                  const b = li.querySelector('.copy'); b.textContent = '✓'; setTimeout(()=>b.textContent='copy', 1200);
+            } catch {}
+          };
+          ul.appendChild(li);
+        }
+      } catch (e) { cfgErr.textContent = 'Failed to load location: ' + e.message; }
+
+      // Discord config.
+      try {
+        const dc = await (await fetch(`${API}/api/v1/config/discord`)).json();
+        $('dc-enabled').checked  = !!dc.enabled;
+        $('dc-token').value      = dc.token || '';
+        $('dc-token').placeholder = dc.token === '***'
+          ? 'stored (leave as *** to keep unchanged)'
+          : 'paste from discord.com/developers';
+        $('dc-guild').value      = dc.guild_id != null ? String(dc.guild_id) : '';
+        $('dc-prefix').value     = dc.prefix || '!coop';
+        $('dc-apibase').value    = dc.api_base || '';
+      } catch (e) { cfgErr.textContent = 'Failed to load discord cfg: ' + e.message; }
+    }
+
+    $('btn-cfg-save').onclick = async () => {
+      cfgErr.textContent = '';
+      const guildStr = $('dc-guild').value.trim();
+      let guild_id = null;
+      if (guildStr) {
+        if (!/^\d+$/.test(guildStr)) { cfgErr.textContent = 'Guild ID must be a number.'; return; }
+        guild_id = Number(guildStr);
+      }
+      const body = {
+        enabled:  $('dc-enabled').checked,
+        token:    $('dc-token').value,
+        guild_id,
+        prefix:   $('dc-prefix').value.trim() || '!coop',
+        api_base: $('dc-apibase').value.trim() || null,
+      };
+      if (body.enabled && (!body.token || guild_id === null)) {
+        cfgErr.textContent = 'Token and Guild ID are required when enabled.'; return;
+      }
+      try {
+        const r = await fetch(`${API}/api/v1/config/discord`, {
+          method: 'PUT', headers: {'content-type':'application/json'},
+          body: JSON.stringify(body)
+        });
+        if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+        cfgErr.style.color = 'var(--accent-2)';
+        cfgErr.textContent = '✓ saved · bot ' + (body.enabled ? 'restarted' : 'stopped');
+        setTimeout(() => { cfgErr.style.color=''; cfgErr.textContent=''; }, 1800);
+        loadCfg();
+      } catch (e) { cfgErr.textContent = 'Save failed: ' + e.message; }
+    };
+
+    // Esc closes whichever modal is open.
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && cfgModal.classList.contains('open')) closeCfg();
+    });
+
+    // ==========================================================
+    //  Tasks tab — farm-wide queue
+    // ==========================================================
+    async function refreshTasks() {
+      const list = $('tasks-list');
+      try {
+        const r = await fetch(`${API}/api/v1/tasks`);
+        const items = await r.json();
+        if (!items.length) {
+          list.innerHTML = '<div class="tasks-empty">No tasks yet. Dispatch one above.</div>';
+          return;
+        }
+        list.innerHTML = items.map(t => {
+          const ts = (t.created_at || '').replace('T',' ').slice(5,16);
+          const kind = t.required_agent_kind || 'any';
+          const claimed = t.claimed_by ? t.claimed_by.split('/').pop() : '—';
+          const canDone = t.status === 'PENDING' || t.status === 'DISPATCHED';
+          const canCancel = t.status === 'PENDING';
+          const actions = [
+            canDone ? `<button data-act="done" data-id="${esc(t.id)}">✓ done</button>` : '',
+            canCancel ? `<button data-act="cancel" data-id="${esc(t.id)}">✕ cancel</button>` : '',
+          ].filter(Boolean).join('');
+          return `<div class="task-item">
+            <span class="ts">${esc(ts)}</span>
+            <span class="kind">${esc(kind)}</span>
+            <span class="prompt" title="${esc(t.prompt)}">${esc(t.prompt)}</span>
+            <span class="claimed">${esc(claimed)}</span>
+            <span class="stat ${esc(t.status)}">${esc(t.status)}</span>
+            <span class="task-actions">${actions}</span>
+          </div>`;
+        }).join('');
+        list.querySelectorAll('button[data-act]').forEach(b => {
+          b.onclick = async () => {
+            const id = b.dataset.id; const act = b.dataset.act;
+            const url = act === 'done'
+              ? `${API}/api/v1/tasks/${encodeURIComponent(id)}/done`
+              : `${API}/api/v1/tasks/${encodeURIComponent(id)}`;
+            await fetch(url, {method: act === 'done' ? 'POST' : 'DELETE'}).catch(()=>{});
+            refreshTasks();
+          };
+        });
+      } catch (e) {
+        list.innerHTML = `<div class="tasks-empty">Failed to load tasks: ${esc(String(e))}</div>`;
+      }
+    }
+
+    $('task-submit').onclick = async () => {
+      const prompt = $('task-prompt').value.trim();
+      const kind   = $('task-kind').value || null;
+      const err    = $('task-error');
+      err.textContent = '';
+      if (!prompt) { err.textContent = 'prompt is empty'; return; }
+      try {
+        const r = await fetch(`${API}/api/v1/tasks`, {
+          method: 'POST',
+          headers: {'content-type':'application/json'},
+          body: JSON.stringify({prompt, required_agent_kind: kind}),
+        });
+        if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+        $('task-prompt').value = '';
+        refreshTasks();
+      } catch (e) { err.textContent = e.message || String(e); }
+    };
+    $('task-prompt').addEventListener('keydown', e => {
+      if (e.key === 'Enter') $('task-submit').click();
+    });
+    // Periodic refresh while Tasks tab is visible.
+    setInterval(() => { if (activeTab === 'tasks') refreshTasks(); }, 4000);
+  </script>
+</body>
+</html>

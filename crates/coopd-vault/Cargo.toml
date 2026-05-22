@@ -1,0 +1,28 @@
+[package]
+name = "coopd-vault"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Sealed credential vault for Coop"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+zeroize = { workspace = true }
+rand = { workspace = true }
+hex = { workspace = true }
+# v0.1 uses simple XChaCha20-Poly1305 via libsodium-sys-stable.
+# We prefer a pure-Rust dep here to ease cross-compile.
+chacha20poly1305 = "0.10"
+argon2 = "0.5"
+
+[dev-dependencies]
+tempfile = { workspace = true }
