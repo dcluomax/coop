@@ -1,0 +1,140 @@
+//! Orchestrator command and event channels.
+//!
+//! The orchestrator is a single Tokio task that owns the authoritative farm
+//! state. All mutations flow through it via [`OrchCmd`]. Subscribers observe
+//! changes via [`OrchEvent`] broadcasts.
+
+use serde::Serialize;
+use tokio::sync::oneshot;
+
+use crate::error::Result;
+use crate::hen::{Hen, HenState};
+use crate::ids::HenId;
+use crate::manifest::AgentManifest;
+
+/// Commands sent into the orchestrator.
+///
+/// Every variant carries a `oneshot::Sender` reply channel so the caller can
+/// observe success / failure synchronously.
+#[derive(Debug)]
+pub enum OrchCmd {
+    /// Create a new Hen from a manifest.
+    CreateHen {
+        /// Validated manifest.
+        manifest: AgentManifest,
+        /// Reply channel.
+        reply: oneshot::Sender<Result<HenId>>,
+    },
+    /// Fetch a Hen by ID.
+    GetHen {
+        /// Hen identifier.
+        id: HenId,
+        /// Reply channel.
+        reply: oneshot::Sender<Result<Hen>>,
+    },
+    /// List all known Hens.
+    ListHens {
+        /// Optional filter on state.
+        state: Option<HenState>,
+        /// Reply channel.
+        reply: oneshot::Sender<Result<Vec<Hen>>>,
+    },
+    /// Transition a Hen to a new state.
+    TransitionHen {
+        /// Hen identifier.
+        id: HenId,
+        /// Target state.
+        next: HenState,
+        /// Reply channel.
+        reply: oneshot::Sender<Result<()>>,
+    },
+    /// Delete a Hen permanently.
+    DeleteHen {
+        /// Hen identifier.
+        id: HenId,
+        /// Reply channel.
+        reply: oneshot::Sender<Result<()>>,
+    },
+    /// Submit a new Job for execution.
+    SubmitJob {
+        /// Target Hen.
+        hen_id: HenId,
+        /// User prompt.
+        prompt: String,
+        /// Reply channel returning the Job ID.
+        reply: oneshot::Sender<Result<String>>,
+    },
+    /// Fetch a job by ID.
+    GetJob {
+        /// Job ID.
+        id: String,
+        /// Reply channel.
+        reply: oneshot::Sender<Result<crate::Job>>,
+    },
+    /// List jobs (optionally filter by Hen).
+    ListJobs {
+        /// Optional filter.
+        hen_id: Option<HenId>,
+        /// Reply channel.
+        reply: oneshot::Sender<Result<Vec<crate::Job>>>,
+    },
+    /// Persist an updated Job (used by runner tasks).
+    UpdateJob {
+        /// Updated record.
+        job: crate::Job,
+        /// Reply channel.
+        reply: oneshot::Sender<Result<()>>,
+    },
+    /// Try to pick up the next Queued job for a Hen (used by runner after a
+    /// job completes; the orchestrator inspects state and spawns the next
+    /// runner if the hen is Idle and a Queued job exists).
+    DispatchNextQueued {
+        /// Hen identifier.
+        hen_id: HenId,
+        /// Reply channel (Some(job_id) if dispatched, None otherwise).
+        reply: oneshot::Sender<Result<Option<String>>>,
+    },
+    /// Trigger graceful shutdown.
+    Shutdown,
+}
+
+/// Events broadcast by the orchestrator to subscribers.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OrchEvent {
+    /// A new Hen was created.
+    HenCreated {
+        /// Hen identifier.
+        id: HenId,
+    },
+    /// A Hen changed state.
+    HenStateChanged {
+        /// Hen identifier.
+        id: HenId,
+        /// Previous state.
+        from: HenState,
+        /// New state.
+        to: HenState,
+    },
+    /// A Hen was deleted.
+    HenDeleted {
+        /// Hen identifier.
+        id: HenId,
+    },
+    /// A new Job was submitted.
+    JobSubmitted {
+        /// Job ID.
+        job_id: String,
+        /// Owning Hen.
+        hen_id: HenId,
+    },
+    /// A Job changed status.
+    JobStatusChanged {
+        /// Job ID.
+        job_id: String,
+        /// New status.
+        status: crate::JobStatus,
+    },
+    /// Orchestrator is shutting down.
+    ShuttingDown,
+}

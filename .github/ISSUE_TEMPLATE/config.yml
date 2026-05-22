@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Discussion / Question
+    url: https://github.com/coop-network/coop/discussions
+    about: For questions, design discussions, and "is this a bug?" triage.
+  - name: 🔒 Security report
+    url: https://github.com/coop-network/coop/security/advisories/new
+    about: Privately report a vulnerability. Do NOT open a public issue.

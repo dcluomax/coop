@@ -1,0 +1,22 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coop runtime data (never commit)
+.coop/
+*.boltdb
+*.redb
+vault/
+
+# Build artifacts
+*.profraw
+*.profdata

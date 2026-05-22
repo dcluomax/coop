@@ -1,0 +1,30 @@
+[package]
+name = "coop-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Coop command-line client"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "coop"
+path = "src/main.rs"
+
+[dependencies]
+coopd-core = { workspace = true }
+coopd-vault = { workspace = true }
+
+anyhow = { workspace = true }
+clap = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

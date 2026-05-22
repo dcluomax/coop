@@ -1,0 +1,98 @@
+# Changelog
+
+All notable changes to this project are documented here.
+Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
+
+## [Unreleased]
+
+### Security
+
+- **C1** — `file_read`/`file_write` now confine all paths to the hen's
+  workdir. Absolute paths, `..`, and symlinks escaping the base are rejected
+  via canonicalization. (Shared helper: `coopd_tools::safe_path::safe_resolve`.)
+- **C2** — `http` tool gains SSRF guard: scheme must be http/https; resolved
+  IPs in loopback/RFC1918/CGNAT/link-local/multicast/IPv6 ULA are refused;
+  redirects capped at 3 hops and re-validated per hop. Adds
+  `coopd_tools::safe_net`.
+- **C3 + C4** — New `safe_origin` middleware fronts every route: refuses
+  requests whose `Host` header isn't a loopback name and whose `Origin`
+  (when present) isn't a loopback URL. Defeats cross-origin WebSocket
+  hijack against `/api/v1/hens/:id/shell` and browser-initiated CSRF
+  against the JSON API. Disable with `COOP_PUBLIC=1` for deliberate
+  public deployments (still requires `COOP_API_TOKEN`).
+- **H1** — `~/.coop` is `0700`; `vault.json` and `state.redb` are `0600` on
+  Unix.
+- **H2** — `Vault` holds its salt in-memory; `persist()` no longer
+  round-trips through the file, so an accidentally-deleted (or replaced)
+  vault file mid-run won't silently rotate to an unrecoverable key.
+- **H3** — `bash` tool ignores model-supplied `workdir`; the hen workdir
+  from `ToolCtx` is always used.
+- **H6** — WebSocket frames capped (`/watch`: 64 KiB; `/shell`: 256 KiB)
+  to prevent OOM via 64 MiB default ceiling.
+- **M6** — Discord connector now default-denies. Set
+  `COOP_DISCORD_ALLOWED_USERS=<id>,<id>,…` (or the `allowed_user_ids` JSON
+  field) to enumerate which Discord user IDs may dispatch jobs. Empty
+  list = bot is dormant.
+- **L1** — Farm UI's xterm.js + addon CDN scripts now carry SRI
+  (`integrity="sha384-…"`).
+- **LP1 (lease policy)** — `manifest.lease` gains three enforcement knobs:
+  - `require_framework: bool` (default **true**). When `allow_lease: true`,
+    the agent's `brain.kind` is rejected at manifest-validation time unless
+    it is one of the sandboxed CLI frameworks: `claude-code`, `codex`,
+    `gh-copilot`. The in-process `anthropic` brain and the raw `shell`
+    brain are refused for lease unless the farm owner explicitly opts out
+    with `require_framework: false`.
+  - `allowed_tools: [..]` — subset of the manifest's `tools:` list. For the
+    in-process Anthropic brain this is a **hard wall** in `invoke_tool`
+    (denied tools never execute and are also hidden from the brain's tool
+    catalog). For CLI-framework hens the allowlist is advisory: the hosted
+    CLI process governs its own tool calls (full `--allowedTools`
+    plumbing tracked for v0.2). Unknown tool names in `allowed_tools` are
+    rejected at manifest load.
+  - `topic_filter.{deny_keywords, allow_keywords}` — case-insensitive plain
+    substring filters (no regex, to defeat ReDoS). Deny wins. Enforced
+    **universally** on every leased prompt: `POST /api/v1/hens/:id/jobs`
+    returns **HTTP 403** on violation; the WSS `/shell/send` path and
+    internal task dispatch return `PermissionDenied`.
+
+### Changed
+
+- **Open-core split.** `coopd-market` has been moved out of the OSS workspace
+  into a separate proprietary repo (`coop-market`). The OSS daemon now ships
+  with 7 crates instead of 8; the cross-Coop market layer is enabled via the
+  optional `--features market` Cargo flag and requires a sibling checkout of
+  the private repo. See [AGENTS.md](./AGENTS.md) for the boundary contract.
+- Pinned `rust-toolchain.toml` to `stable` and relaxed the workspace
+  `[lints.clippy]` to drop the `pedantic` preset — new rustc releases keep
+  adding pedantic lints that fail CI without surfacing real bugs.
+
+### Removed
+
+- `crates/coopd-market/` and `scripts/market-demo.sh` (moved to `coop-market`).
+
+## [0.1.0-alpha] — TBD
+
+First public preview. The **ALONE FARMER** milestone: single-Roost, local-only.
+
+### Added
+
+- `coopd` daemon binary with HTTP API on `127.0.0.1:9700`.
+- `coop` CLI (`hen hatch/list/get`, `job run/get/list/wait`, `vault init/unlock/put`).
+- Hen lifecycle state machine: `DEFINED → IDLE → WORKING → IDLE → SLEEPING`.
+- Job runtime: per-job reason/tool loop, 16-turn cap, redb-backed persistence.
+- Built-in tools: `bash`, `file_read`, `file_write`, `http`.
+- Brain adapter: Anthropic (BYOK) via `coopd-brain`.
+- Sealed vault (sodiumoxide, passphrase-derived key) for BYOK secrets.
+- WSS event stream at `GET /api/v1/jobs/:id/watch`.
+- **Farm UI** (`GET /`) — single-page, lists hens with live state badges.
+- **Per-hen PTY shell** at `GET /api/v1/hens/:id/shell` (xterm.js in the browser).
+- `coopd-market` v0 — in-memory local market mock (Listing/Bid/Accept/Cancel). _Moved to private `coop-market` repo before launch — see [Unreleased] above._
+- Startup reconciler: interrupted `RUNNING` jobs → `FAILED`, stuck Hens → `Idle`.
+- E2E test harness (`scripts/e2e.sh`, 12 checks), farm-demo, market-demo.
+- CI matrix (ubuntu + macos) running fmt + clippy + test + doc + e2e.
+- Apache-2.0 license, DCO sign-off requirement, Contributor Covenant CoC.
+
+### Known limitations
+
+See [SECURITY.md](./SECURITY.md) threat-model section and [DECISIONS.md](./DECISIONS.md) "v0.1 Implementation Notes".
