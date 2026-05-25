@@ -183,7 +183,7 @@ streamed over WebSocket directly into that hen's workdir.
       <a href="docs/screenshots/03-sessions.png">
         <img src="docs/screenshots/03-sessions.png" alt="Sessions tab — live PTY shell streamed over WebSocket" />
       </a>
-      <p align="center"><em>🖥 <b>Sessions</b> — real tmux PTY in the browser; <code>$COOP_HEN_ID</code> is already in env.</em></p>
+      <p align="center"><em>🖥 <b>Sessions</b> — persistent tmux PTY on Linux/macOS/WSL, ephemeral ConPTY on native Windows; <code>$COOP_HEN_ID</code> is already in env.</em></p>
     </td>
   </tr>
   <tr>

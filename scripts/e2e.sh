@@ -286,10 +286,10 @@ async def main():
     url = f"ws://127.0.0.1:{port}/api/v1/hens/local.coop%2Faria/shell"
     async with websockets.connect(url) as ws:
         await ws.send(json.dumps({"type":"resize","cols":120,"rows":40}))
-        await ws.send(b"echo COOP_E2E_SHELL_OK COOP_HEN_ID=$COOP_HEN_ID\nexit\n")
+        await ws.send(b"echo COOP_E2E_SHELL_OK COOP_HEN_ID=$COOP_HEN_ID\n")
         buf = bytearray()
         try:
-            while True:
+            while b"COOP_HEN_ID=local.coop/aria" not in buf:
                 m = await asyncio.wait_for(ws.recv(), timeout=4)
                 if isinstance(m, bytes): buf.extend(m)
         except (asyncio.TimeoutError, Exception):
@@ -299,6 +299,39 @@ asyncio.run(main())
 PY
 grep -q "COOP_E2E_SHELL_OK" "$shell_log" && g "shell echoed token"   || { r "shell token missing"; cat "$shell_log" >&2; exit 1; }
 grep -q "COOP_HEN_ID=local.coop/aria" "$shell_log" && g "COOP_HEN_ID env exported" || { r "COOP_HEN_ID missing"; exit 1; }
+
+caps=$(curl -fsS "$API/api/v1/session/capabilities")
+persistent=$("$PY" -c 'import json,sys; print(json.loads(sys.argv[1])["persistent_session"])' "$caps")
+if [[ "$persistent" == "True" || "$persistent" == "true" ]]; then
+  b "[12b] persistent tmux reconnect + send-key convergence"
+  curl -fsS -X POST "$API/api/v1/hens/local.coop%2Faria/shell/send" \
+    -H 'content-type: application/json' \
+    -d '{"keys":"echo COOP_E2E_SEND_KEYS_OK"}' >/dev/null
+  "$PY" - "$PORT" "$shell_log" <<'PY'
+import asyncio, json, sys
+port, log_path = sys.argv[1], sys.argv[2]
+import websockets
+
+async def main():
+    url = f"ws://127.0.0.1:{port}/api/v1/hens/local.coop%2Faria/shell"
+    async with websockets.connect(url) as ws:
+        await ws.send(json.dumps({"type":"resize","cols":120,"rows":40}))
+        buf = bytearray()
+        try:
+            while b"COOP_E2E_SEND_KEYS_OK" not in buf:
+                m = await asyncio.wait_for(ws.recv(), timeout=4)
+                if isinstance(m, bytes): buf.extend(m)
+        except (asyncio.TimeoutError, Exception):
+            pass
+        await ws.send(b"exit\n")
+        with open(log_path, "ab") as f:
+            f.write(buf)
+asyncio.run(main())
+PY
+  grep -q "COOP_E2E_SEND_KEYS_OK" "$shell_log" && g "shell/send reaches reattached tmux session" || { r "persistent marker missing"; cat "$shell_log" >&2; exit 1; }
+else
+  y "persistent tmux reconnect skipped ($(j_get "$caps" note))"
+fi
 
 # Verify static UI is served.
 ui_head=$(curl -fsS "$API/" | head -1 || true)

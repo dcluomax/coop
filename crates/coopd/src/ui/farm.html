@@ -2702,7 +2702,7 @@
     document.querySelector('.topnav .navtab[data-tab="tasks"]').classList.add('active');
 
     // ==========================================================
-    //  Console tab — per-hen tmux stream (no chrome; agent CLI owns UX)
+    //  Console tab — per-hen session stream (tmux when persistent; plain PTY fallback)
     // ==========================================================
     // tmuxTabs[henId] = { term, fit, ws, host, ro }
     const tmuxTabs = {};
@@ -2723,7 +2723,7 @@
       if (!root) return;
       const ids = Object.keys(tmuxTabs);
       if (!ids.length) {
-        root.innerHTML = '<span class="sess" style="color:var(--muted)">no tmux sessions — attach a hen →</span>';
+        root.innerHTML = '<span class="sess" style="color:var(--muted)">no sessions — attach a hen →</span>';
         return;
       }
       root.innerHTML = ids.map(id => {
