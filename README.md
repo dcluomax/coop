@@ -197,7 +197,7 @@ streamed over WebSocket directly into that hen's workdir.
       <a href="docs/screenshots/04-market.png">
         <img src="docs/screenshots/04-market.png" alt="Market tab — cross-coop compute market" />
       </a>
-      <p align="center"><em>🛒 <b>Market</b> — optional cross-coop compute market (separate <a href="https://github.com/dcluomax/coop-market"><code>coop-market</code></a> repo).</em></p>
+      <p align="center"><em>🛒 <b>Market</b> — optional cross-coop compute market (separate private <a href="https://farm.startcaas.com/dcluo/coop-market"><code>coop-market</code></a> repo).</em></p>
     </td>
   </tr>
 </table>
