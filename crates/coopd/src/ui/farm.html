@@ -1489,10 +1489,10 @@
           in <code>AGENTS.md</code>).
         </p>
         <div class="market-actions">
-          <a class="market-cta" href="https://farm.startcaas.com" target="_blank" rel="noreferrer">
+          <a class="market-cta" id="market-cta" href="https://farm.startcaas.com" target="_blank" rel="noreferrer">
             Open Public Market ↗
           </a>
-          <span class="market-status" id="market-status">checking local market peer…</span>
+          <span class="market-status" id="market-status">loading market config…</span>
         </div>
       </div>
     </section>
@@ -2879,25 +2879,24 @@
     showTmuxEmpty(true);
 
     // ==========================================================
-    //  Market tab — probe for a sibling coop-market daemon
+    //  Market tab — public market URL comes from coopd config.
     // ==========================================================
     async function refreshMarketStatus() {
       const el = $('market-status');
       if (!el) return;
-      el.textContent = 'checking local market peer…';
+      const cta = $('market-cta');
+      el.textContent = 'loading market config…';
       try {
-        const r = await fetch(`${API}/api/v1/market/peers`, { method: 'GET' });
-        if (r.ok) {
-          const j = await r.json().catch(() => null);
-          const n = Array.isArray(j) ? j.length : (j && j.peers && j.peers.length) || 0;
-          el.textContent = `✅ market peer connected · ${n} known coop${n===1?'':'s'}`;
-          el.style.color = 'var(--accent-2)';
-        } else {
-          el.textContent = '◌ no local market peer (run coop-market alongside coopd)';
-          el.style.color = 'var(--muted)';
-        }
-      } catch (_) {
-        el.textContent = '◌ no local market peer (run coop-market alongside coopd)';
+        const r = await fetch(`${API}/api/v1/config/market`, { method: 'GET' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const cfg = await r.json();
+        const url = new URL(cfg.public_url || 'https://farm.startcaas.com');
+        if (cta) cta.href = url.toString();
+        el.textContent = `✅ public market configured · ${url.host}`;
+        el.style.color = 'var(--accent-2)';
+      } catch (e) {
+        if (cta) cta.href = 'https://farm.startcaas.com';
+        el.textContent = '⚠ using default public market · farm.startcaas.com';
         el.style.color = 'var(--muted)';
       }
     }

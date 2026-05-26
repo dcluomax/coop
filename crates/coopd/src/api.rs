@@ -44,6 +44,7 @@ pub fn router(
     Router::new()
         .route("/api/v1/healthz", get(healthz))
         .route("/api/v1/readyz", get(readyz))
+        .route("/api/v1/config/market", get(get_market_config))
         .route("/api/v1/session/capabilities", get(session_capabilities))
         .route("/api/v1/farm", get(farm))
         .route("/api/v1/hens", get(list_hens).post(create_hen))
@@ -102,6 +103,20 @@ async fn readyz(State(_orch): State<OrchHandle>) -> impl IntoResponse {
 
 async fn session_capabilities() -> Json<crate::session::SessionCapabilities> {
     Json(crate::session::capabilities())
+}
+
+#[derive(Serialize)]
+struct MarketConfig {
+    public_url: String,
+}
+
+async fn get_market_config() -> Json<MarketConfig> {
+    let public_url = std::env::var("COOP_MARKET_URL")
+        .ok()
+        .map(|s| s.trim().trim_end_matches('/').to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "https://farm.startcaas.com".to_string());
+    Json(MarketConfig { public_url })
 }
 
 #[derive(Serialize)]
