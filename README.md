@@ -197,7 +197,7 @@ streamed over WebSocket directly into that hen's workdir.
       <a href="docs/screenshots/04-market.png">
         <img src="docs/screenshots/04-market.png" alt="Market tab — cross-coop compute market" />
       </a>
-      <p align="center"><em>🛒 <b>Market</b> — optional cross-coop compute market at <a href="https://farm.startcaas.com"><code>farm.startcaas.com</code></a>.</em></p>
+      <p align="center"><em>🛒 <b>Market</b> — public cross-coop compute market at <a href="https://farm.startcaas.com"><code>farm.startcaas.com</code></a>.</em></p>
     </td>
   </tr>
 </table>
