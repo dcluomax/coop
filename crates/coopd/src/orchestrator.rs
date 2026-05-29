@@ -25,7 +25,8 @@ pub struct OrchHandle {
     pub coop_id: CoopId,
     /// Shared brain factory (vault-aware).
     pub brain_factory: Arc<Mutex<BrainFactory>>,
-    /// Per-hen workdir root: `<workdir_base>/<hen-name>/`.
+    /// Per-hen workdir root: `<workdir_base>/<hen.workdir_key()>/`
+    /// (unique per instance: `<sanitized-coop>__<name>`).
     pub workdir_base: std::path::PathBuf,
     /// Hens for whom the configured CLI agent has been auto-launched
     /// in their persistent tmux session already. Lives for the daemon's

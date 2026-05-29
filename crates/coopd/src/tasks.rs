@@ -2,9 +2,11 @@
 //!
 //! See [`coopd_core::Task`] for the data model. This module owns the
 //! in-memory registry + dispatcher. Tasks are routed to **CLI-agent
-//! hens** by piping `prompt + Enter` into their persistent tmux
-//! session via `tmux send-keys`. No persistence yet — the queue lives
-//! for the daemon's lifetime; can be swapped for redb later.
+//! hens** by piping `prompt + Enter` into their persistent session backend.
+//! On Unix/macOS this is tmux; on native Windows the browser shell is
+//! currently ephemeral and task dispatch returns a clear unsupported error.
+//! No task persistence yet — the queue lives for the daemon's lifetime; can
+//! be swapped for redb later.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,6 +16,7 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use crate::orchestrator::OrchHandle;
+use crate::session;
 
 /// Clonable handle to the in-memory task registry.
 #[derive(Clone)]
@@ -128,7 +131,7 @@ impl TaskService {
     }
 }
 
-/// Inject `text\n` into the hen's tmux session via `tmux -L coop send-keys`.
+/// Inject `text\n` into the hen's persistent tmux session.
 /// If the session doesn't exist yet, create it detached (so tasks can be
 /// dispatched to hens that nobody has attached to via the browser yet),
 /// auto-launch the configured CLI, then send-keys the prompt.
@@ -148,12 +151,19 @@ pub async fn send_keys_to_hen(
             ));
         }
     }
-    let sess_name = tmux_session_name(hen_id);
-    let workdir = orch.workdir_base.join(hen_id.name());
-    let tmux_dir = workdir.join(".tmux");
+    if !session::tmux_available() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "persistent task dispatch requires tmux; native Windows currently supports only ephemeral PTY shells (use WSL+tmux for persistent sessions)",
+        ));
+    }
+
+    let sess_name = session::tmux_session_name(hen_id);
+    let workdir = orch.workdir_base.join(hen_id.workdir_key());
+    let tmux_dir = session::tmux_socket_dir(&sess_name, &workdir);
     // Ensure the workdir + tmux socket dir exist before we shell out.
     let _ = tokio::fs::create_dir_all(&workdir).await;
-    let _ = tokio::fs::create_dir_all(&tmux_dir).await;
+    session::ensure_tmux_socket_dir(&tmux_dir)?;
 
     // Look up the hen so we can auto-launch its CLI if we're creating the
     // session for the first time.
@@ -172,7 +182,7 @@ pub async fn send_keys_to_hen(
 
     let text = text.to_string();
     let workdir_str = workdir.to_string_lossy().to_string();
-    let user_shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+    let user_shell = session::default_shell();
 
     tokio::task::spawn_blocking(move || -> std::io::Result<()> {
         let base = || {
@@ -231,25 +241,4 @@ pub async fn send_keys_to_hen(
         orch.auto_launched.lock().await.insert(hen_key);
     }
     Ok(())
-}
-
-/// Same sanitisation as `shell.rs::sess_name`.
-#[must_use]
-pub fn tmux_session_name(hen_id: &HenId) -> String {
-    let short = hen_id
-        .to_string()
-        .rsplit('/')
-        .next()
-        .unwrap_or("hen")
-        .to_string();
-    let mut s = String::with_capacity(short.len() + 5);
-    s.push_str("coop-");
-    for c in short.chars() {
-        s.push(if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-            c
-        } else {
-            '_'
-        });
-    }
-    s
 }

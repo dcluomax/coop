@@ -21,6 +21,7 @@ mod location;
 mod orchestrator;
 mod runner;
 mod safe_origin;
+mod session;
 mod shell;
 mod tasks;
 mod ui;

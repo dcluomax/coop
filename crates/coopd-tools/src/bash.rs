@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use coopd_core::{CoopTool, CoreError, Result, ToolCapability, ToolCtx, ToolSchema};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tokio::process::Command;
 
 /// `bash` tool — runs a single shell command with a timeout.
 #[derive(Debug, Default)]
@@ -76,11 +75,12 @@ impl CoopTool for Bash {
     async fn invoke(&self, ctx: &ToolCtx, input: Value) -> Result<Value> {
         let inp: Input = serde_json::from_value(input)?;
         // workdir is ALWAYS the runner-supplied hen workdir (H3 fix):
-        // never trust model input to pick the cwd.
+        // never trust model input to pick the cwd. The sandbox confines the
+        // command to this workdir and scrubs the environment so hen instances
+        // are isolated from each other and from host secrets.
         let workdir = ctx.workdir.clone();
 
-        let mut cmd = Command::new("bash");
-        cmd.arg("-c").arg(&inp.command).current_dir(&workdir);
+        let mut cmd = crate::sandbox::bash_command(&workdir, &ctx.agent_id, &inp.command);
 
         let dur = std::time::Duration::from_secs(inp.timeout_s.min(600));
         let result = tokio::time::timeout(dur, cmd.output()).await;

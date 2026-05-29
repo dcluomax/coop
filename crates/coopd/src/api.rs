@@ -44,6 +44,8 @@ pub fn router(
     Router::new()
         .route("/api/v1/healthz", get(healthz))
         .route("/api/v1/readyz", get(readyz))
+        .route("/api/v1/config/market", get(get_market_config))
+        .route("/api/v1/session/capabilities", get(session_capabilities))
         .route("/api/v1/farm", get(farm))
         .route("/api/v1/hens", get(list_hens).post(create_hen))
         .route("/api/v1/hens/:id", get(get_hen).delete(delete_hen))
@@ -97,6 +99,24 @@ async fn healthz() -> impl IntoResponse {
 
 async fn readyz(State(_orch): State<OrchHandle>) -> impl IntoResponse {
     Json(OkBody { ok: true })
+}
+
+async fn session_capabilities() -> Json<crate::session::SessionCapabilities> {
+    Json(crate::session::capabilities())
+}
+
+#[derive(Serialize)]
+struct MarketConfig {
+    public_url: String,
+}
+
+async fn get_market_config() -> Json<MarketConfig> {
+    let public_url = std::env::var("COOP_MARKET_URL")
+        .ok()
+        .map(|s| s.trim().trim_end_matches('/').to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "https://farm.startcaas.com".to_string());
+    Json(MarketConfig { public_url })
 }
 
 #[derive(Serialize)]
@@ -352,9 +372,16 @@ async fn shell_send(
         // that need precise key handling. Still attaches to an existing
         // session only — we don't auto-create here because the typical caller
         // is the in-tmux UI.
-        let sess = crate::tasks::tmux_session_name(&hen_id);
-        let workdir = orch.workdir_base.join(hen_id.name());
-        let tmux_dir = workdir.join(".tmux");
+        if !crate::session::tmux_available() {
+            return Err(AppError::bad_request(
+                "raw shell/send requires a persistent tmux session; native Windows currently supports only ephemeral PTY shells",
+            ));
+        }
+        let sess = crate::session::tmux_session_name(&hen_id);
+        let workdir = orch.workdir_base.join(hen_id.workdir_key());
+        let tmux_dir = crate::session::tmux_socket_dir(&sess, &workdir);
+        crate::session::ensure_tmux_socket_dir(&tmux_dir)
+            .map_err(|e| AppError::bad_request(format!("mkdir tmux socket dir: {e}")))?;
         let keys = body.keys;
         tokio::task::spawn_blocking(move || -> std::io::Result<()> {
             let status = std::process::Command::new("tmux")

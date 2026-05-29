@@ -17,8 +17,9 @@ You should receive a response within **5 business days**. If you do not, please 
 - **In-scope**: vault sealing/unsealing, hen workdir isolation, PTY shell
   auth bypass on loopback, brain key leakage in logs, tool sandbox escape.
 - **Out of scope (known + accepted for v0.1)**:
-  - Tools run **in-process** in `coopd` — no kernel sandbox. Containerized
-    tool runtime is on the v0.2 roadmap.
+  - Non-`bash` tools run **in-process** in `coopd` — no kernel sandbox. The
+    `bash` tool **is** sandboxed per instance (see C5/H7); a fully
+    containerized tool runtime for the rest is on the v0.2 roadmap.
   - HTTP API and PTY WSS bind to `127.0.0.1` only. Set `COOP_API_TOKEN` for
     bearer auth; set `COOP_PUBLIC=1` only after that to allow non-loopback
     binds (the daemon refuses non-loopback `Host`/`Origin` headers
@@ -37,6 +38,9 @@ These controls land in the current source tree:
 | H1  | `~/.coop` is `0700`; `vault.json` and `state.redb` are `0600`.                |
 | H2  | Vault salt is held in-memory; `persist()` no longer re-reads the file → vault survives accidental deletion mid-run. |
 | H3  | `bash` tool ignores model-supplied `workdir`; always uses the hen's workdir.   |
+| C5  | **Per-instance `bash` sandbox.** Shell commands are confined to the hen's own workdir with an OS-native sandbox — macOS Seatbelt (`sandbox-exec`) and Linux Bubblewrap (`bwrap`): writes outside the workdir are denied and sibling hens' workdirs are unreadable, so one chicken cannot read or tamper with another. A cached capability probe falls back to env-scrub + `cwd` confinement (with a one-time warning) where the OS sandbox is unavailable; `COOP_SANDBOX=0` disables it. Windows strong confinement requires WSL/containers (limitation). |
+| H7  | **`bash` environment scrub.** The shell runs with `env_clear()` and a minimal allowlist (`PATH`, `HOME`/`TMPDIR`=workdir, `COOP_HEN_*`, locale), so host secrets (vault passphrase, API keys, bearer tokens) and one hen's env never leak into another's shell. |
+| H8  | **Unique-per-instance workdir.** Workdirs key on `HenId::workdir_key()` (`<coop>__<name>`), so a leased-in `bob.coop/aria` cannot collide with a local `alice.coop/aria`. |
 | H6  | WebSocket frames capped (`/watch`: 64 KiB; `/shell`: 256 KiB).                |
 | M6  | Discord connector default-denies; only IDs in `COOP_DISCORD_ALLOWED_USERS` (or `allowed_user_ids` JSON field) can dispatch jobs. |
 | L1  | Farm UI's xterm.js + addon load with SRI (`integrity=sha384-…`).              |
