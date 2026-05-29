@@ -56,6 +56,32 @@ pub fn bash_command(workdir: &Path, hen_id: &str, command: &str) -> Command {
     cmd
 }
 
+/// Whether **OS-native filesystem confinement** (not just the env scrub) is in
+/// effect on this host: sandboxing is enabled and the platform's sandbox tool
+/// passed its capability probe.
+///
+/// Returns `false` on Windows/unsupported hosts, when the probe fails (e.g. CI
+/// without user namespaces), or when `COOP_SANDBOX=0`. Useful for tests and for
+/// operators auditing whether instance isolation is fully active.
+#[must_use]
+pub fn isolation_active() -> bool {
+    if !sandbox_enabled() {
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        seatbelt_works()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        bwrap_works()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        false
+    }
+}
+
 /// A plain `bash -c <command>` with no OS wrapper.
 fn plain_command(command: &str) -> Command {
     let mut cmd = Command::new("bash");
@@ -268,5 +294,96 @@ mod tests {
             .unwrap();
         assert!(out.status.success());
         assert!(String::from_utf8_lossy(&out.stdout).contains("hello"));
+    }
+
+    // ---- End-to-end OS-sandbox isolation -------------------------------
+    // These assert real cross-instance confinement through the actual
+    // bash_command() path. They only run when the OS sandbox is active
+    // (skipped on Windows / CI without userns), so they never false-fail.
+
+    #[tokio::test]
+    async fn sibling_workdir_is_unreadable() {
+        if !isolation_active() {
+            eprintln!("skip: OS sandbox inactive on this host");
+            return;
+        }
+        let root = tempdir().unwrap();
+        let alice = root.path().join("alice-coop__aria");
+        let bob = root.path().join("bob-coop__aria");
+        std::fs::create_dir_all(&alice).unwrap();
+        std::fs::create_dir_all(&bob).unwrap();
+        std::fs::write(bob.join("secret.txt"), "bob-secret").unwrap();
+
+        // alice tries to read bob's secret via an absolute path.
+        let bob_secret = bob.join("secret.txt");
+        let out = bash_command(
+            &alice,
+            "alice.coop/aria",
+            &format!("cat '{}'", bob_secret.display()),
+        )
+        .output()
+        .await
+        .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            !stdout.contains("bob-secret"),
+            "ISOLATION BREACH: alice read bob's workdir: {stdout}"
+        );
+        assert!(
+            !out.status.success(),
+            "expected non-zero exit when reading sibling workdir"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_outside_workdir_is_denied() {
+        if !isolation_active() {
+            eprintln!("skip: OS sandbox inactive on this host");
+            return;
+        }
+        let root = tempdir().unwrap();
+        let wd = root.path().join("alice-coop__aria");
+        std::fs::create_dir_all(&wd).unwrap();
+        let escape = root.path().join("escape.txt");
+
+        let out = bash_command(
+            &wd,
+            "alice.coop/aria",
+            &format!("echo pwned > '{}'", escape.display()),
+        )
+        .output()
+        .await
+        .unwrap();
+        assert!(
+            !escape.exists(),
+            "ISOLATION BREACH: wrote outside workdir at {}",
+            escape.display()
+        );
+        assert!(
+            !out.status.success(),
+            "expected non-zero exit on denied write"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_inside_own_workdir_is_allowed() {
+        if !isolation_active() {
+            eprintln!("skip: OS sandbox inactive on this host");
+            return;
+        }
+        let root = tempdir().unwrap();
+        let wd = root.path().join("alice-coop__aria");
+        std::fs::create_dir_all(&wd).unwrap();
+
+        let out = bash_command(&wd, "alice.coop/aria", "echo ok > mine.txt && cat mine.txt")
+            .output()
+            .await
+            .unwrap();
+        assert!(out.status.success(), "own-workdir write should succeed");
+        assert!(String::from_utf8_lossy(&out.stdout).contains("ok"));
+        assert_eq!(
+            std::fs::read_to_string(wd.join("mine.txt")).unwrap().trim(),
+            "ok"
+        );
     }
 }
