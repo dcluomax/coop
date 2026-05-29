@@ -159,7 +159,7 @@ pub async fn send_keys_to_hen(
     }
 
     let sess_name = session::tmux_session_name(hen_id);
-    let workdir = orch.workdir_base.join(hen_id.name());
+    let workdir = orch.workdir_base.join(hen_id.workdir_key());
     let tmux_dir = session::tmux_socket_dir(&sess_name, &workdir);
     // Ensure the workdir + tmux socket dir exist before we shell out.
     let _ = tokio::fs::create_dir_all(&workdir).await;

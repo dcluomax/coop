@@ -59,7 +59,7 @@ async fn run_job(
             let bf = brain_factory.lock().await;
             bf.build(&manifest)?
         };
-        let workdir = workdir_base.join(hen.id.name());
+        let workdir = workdir_base.join(hen.id.workdir_key());
         tokio::fs::create_dir_all(&workdir)
             .await
             .map_err(|e| CoreError::Io(format!("mkdir workdir: {e}")))?;

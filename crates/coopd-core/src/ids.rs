@@ -126,6 +126,31 @@ impl HenId {
     pub fn coop(&self) -> &str {
         self.0.split_once('/').map_or(&self.0, |(c, _)| c)
     }
+
+    /// Filesystem-safe key that is **unique per hen instance**.
+    ///
+    /// Combines the coop and name portions so that a leased-in
+    /// `bob.coop/aria` cannot collide with a local `alice.coop/aria`.
+    /// Every character outside `[a-z0-9-]` (e.g. the `.` / `:` in a coop id)
+    /// is replaced with `-`, yielding a single path segment that is legal on
+    /// Linux, macOS, and Windows alike.
+    ///
+    /// Example: `bob.coop/aria` → `bob-coop__aria`.
+    #[must_use]
+    pub fn workdir_key(&self) -> String {
+        let sanitize = |s: &str| -> String {
+            s.chars()
+                .map(|c| {
+                    if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
+                .collect()
+        };
+        format!("{}__{}", sanitize(self.coop()), sanitize(self.name()))
+    }
 }
 
 impl fmt::Display for HenId {
@@ -237,6 +262,28 @@ mod tests {
     fn hen_id_parse() {
         let id = HenId::parse("bob.coop/code-reviewer-v2").unwrap();
         assert_eq!(id.name(), "code-reviewer-v2");
+    }
+
+    #[test]
+    fn workdir_key_is_unique_per_instance() {
+        let alice = HenId::parse("alice.coop/aria").unwrap();
+        let bob = HenId::parse("bob.coop/aria").unwrap();
+        // Same hen name, different coop → distinct, collision-free keys.
+        assert_ne!(alice.workdir_key(), bob.workdir_key());
+        assert_eq!(alice.workdir_key(), "alice-coop__aria");
+    }
+
+    #[test]
+    fn workdir_key_is_filesystem_safe() {
+        // ip:port coops carry a `:` that is illegal in Windows filenames.
+        let id = HenId::parse("192.168.1.5:9700/worker-1").unwrap();
+        let key = id.workdir_key();
+        assert!(
+            key.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_')),
+            "key has unsafe chars: {key}"
+        );
+        assert_eq!(key, "192-168-1-5-9700__worker-1");
     }
 
     #[test]
