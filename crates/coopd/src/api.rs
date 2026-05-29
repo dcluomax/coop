@@ -378,7 +378,7 @@ async fn shell_send(
             ));
         }
         let sess = crate::session::tmux_session_name(&hen_id);
-        let workdir = orch.workdir_base.join(hen_id.name());
+        let workdir = orch.workdir_base.join(hen_id.workdir_key());
         let tmux_dir = crate::session::tmux_socket_dir(&sess, &workdir);
         crate::session::ensure_tmux_socket_dir(&tmux_dir)
             .map_err(|e| AppError::bad_request(format!("mkdir tmux socket dir: {e}")))?;

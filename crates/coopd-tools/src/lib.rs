@@ -19,6 +19,7 @@ pub mod file_write;
 pub mod http;
 pub mod safe_net;
 pub mod safe_path;
+pub mod sandbox;
 
 /// Built-in tool registry.
 #[derive(Clone, Default)]

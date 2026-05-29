@@ -71,7 +71,7 @@ async fn run(socket: WebSocket, orch: OrchHandle, raw_id: String) {
             return;
         }
     };
-    let workdir = orch.workdir_base.join(hen.id.name());
+    let workdir = orch.workdir_base.join(hen.id.workdir_key());
     if let Err(e) = tokio::fs::create_dir_all(&workdir).await {
         close_with_error(socket, &format!("mkdir workdir: {e}")).await;
         return;
