@@ -33,6 +33,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 use crate::orchestrator::OrchHandle;
+use crate::session::{self, SessionBackendKind};
 
 const READ_CHUNK: usize = 4096;
 
@@ -70,46 +71,32 @@ async fn run(socket: WebSocket, orch: OrchHandle, raw_id: String) {
             return;
         }
     };
-    let workdir = orch.workdir_base.join(hen.id.name());
+    let workdir = orch.workdir_base.join(hen.id.workdir_key());
     if let Err(e) = tokio::fs::create_dir_all(&workdir).await {
         close_with_error(socket, &format!("mkdir workdir: {e}")).await;
         return;
     }
 
-    // Wrap in a per-hen, persistent tmux session so that reconnecting the
-    // browser re-attaches to the same session (with its full scrollback +
-    // any long-running agent CLI like codex/claude/gh copilot still alive).
-    // `new-session -A -s <name>` attaches if the session exists, otherwise
-    // creates a fresh one running the user's $SHELL.
-    let user_shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
-    let tmux_available = std::process::Command::new("tmux")
-        .arg("-V")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    // Sanitize hen id into a tmux-safe session name (tmux disallows '.' / ':').
-    let sess_name = {
-        let short = hen_id
-            .to_string()
-            .rsplit('/')
-            .next()
-            .unwrap_or("hen")
-            .to_string();
-        let mut s = String::with_capacity(short.len() + 5);
-        s.push_str("coop-");
-        for c in short.chars() {
-            s.push(if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            });
+    let user_shell = session::default_shell();
+    let backend = session::detect_backend();
+    let sess_name = session::tmux_session_name(&hen_id);
+    let tmux_dir = session::tmux_socket_dir(&sess_name, &workdir);
+    let session_existed = if backend == SessionBackendKind::Tmux {
+        if let Err(e) = session::ensure_tmux_socket_dir(&tmux_dir) {
+            close_with_error(socket, &format!("mkdir tmux socket dir: {e}")).await;
+            return;
         }
-        s
+        std::process::Command::new("tmux")
+            .env("TMUX_TMPDIR", &tmux_dir)
+            .args(["-L", "coop", "has-session", "-t", &sess_name])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    } else {
+        false
     };
-    let tmux_dir = short_tmux_dir(&sess_name);
-    let _ = std::fs::create_dir_all(&tmux_dir);
-    let (shell_cmd, shell_args): (String, Vec<String>) = if tmux_available {
-        (
+    let (shell_cmd, shell_args): (String, Vec<String>) = match backend {
+        SessionBackendKind::Tmux => (
             "tmux".into(),
             vec![
                 "-L".into(),
@@ -120,9 +107,8 @@ async fn run(socket: WebSocket, orch: OrchHandle, raw_id: String) {
                 sess_name.clone(),
                 user_shell.clone(),
             ],
-        )
-    } else {
-        (user_shell.clone(), vec![])
+        ),
+        SessionBackendKind::PlainPty => (user_shell.clone(), vec![]),
     };
     let pty_system = NativePtySystem::default();
     let pair = match pty_system.openpty(PtySize {
@@ -183,38 +169,47 @@ async fn run(socket: WebSocket, orch: OrchHandle, raw_id: String) {
     let writer = Arc::new(std::sync::Mutex::new(writer));
     let master = Arc::new(std::sync::Mutex::new(master));
 
-    info!(hen_id = %hen_id, workdir = %workdir.display(), "shell attached");
+    info!(
+        hen_id = %hen_id,
+        workdir = %workdir.display(),
+        backend = ?backend,
+        persistent = backend == SessionBackendKind::Tmux,
+        "shell attached"
+    );
 
     // If this hen has a CLI agent configured (claude, codex, gh copilot) and
     // we haven't yet launched it for this hen this daemon-lifetime, send
     // the launch command into the tmux session ~600ms after attach (giving
     // tmux time to settle). Tracked in `orch.auto_launched` so reconnects
     // don't relaunch.
-    if let Some(cli) = hen.manifest.agent_kind.launch_cmd() {
+    if backend == SessionBackendKind::Tmux {
         let key = hen_id.to_string();
         let already = {
             let mut g = orch.auto_launched.lock().await;
-            if g.contains(&key) {
+            if session_existed || g.contains(&key) {
+                g.insert(key.clone());
                 true
             } else {
                 g.insert(key.clone());
                 false
             }
         };
-        if !already {
-            let sess = sess_name.clone();
-            let tmux_tmpdir = tmux_dir.clone();
-            let cli_cmd = cli.to_string();
-            tokio::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-                let _ = tokio::task::spawn_blocking(move || {
-                    let _ = std::process::Command::new("tmux")
-                        .env("TMUX_TMPDIR", &tmux_tmpdir)
-                        .args(["-L", "coop", "send-keys", "-t", &sess, &cli_cmd, "Enter"])
-                        .status();
-                })
-                .await;
-            });
+        if let Some(cli) = hen.manifest.agent_kind.launch_cmd() {
+            if !already {
+                let sess = sess_name.clone();
+                let tmux_tmpdir = tmux_dir.clone();
+                let cli_cmd = cli.to_string();
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                    let _ = tokio::task::spawn_blocking(move || {
+                        let _ = std::process::Command::new("tmux")
+                            .env("TMUX_TMPDIR", &tmux_tmpdir)
+                            .args(["-L", "coop", "send-keys", "-t", &sess, &cli_cmd, "Enter"])
+                            .status();
+                    })
+                    .await;
+                });
+            }
         }
     }
 
@@ -320,19 +315,4 @@ async fn close_with_error(mut socket: WebSocket, msg: &str) {
         )))
         .await;
     let _ = socket.send(WsMsg::Close(None)).await;
-}
-
-/// Pick a TMUX_TMPDIR that keeps the resulting socket path
-/// (`$TMUX_TMPDIR/tmux-$UID/coop`) well under the platform's Unix-socket
-/// length limit (104 chars on macOS, 108 on Linux).
-///
-/// We salt the dir with the hen's session name so two hens on the same host
-/// get isolated tmux servers, and avoid `workdir/.tmux` (which on macOS test
-/// runs lands under `/private/var/folders/…/…` and overflows the limit).
-fn short_tmux_dir(sess_name: &str) -> std::path::PathBuf {
-    let base = std::env::var_os("TMPDIR")
-        .map(std::path::PathBuf::from)
-        .filter(|p| p.as_os_str().len() < 40)
-        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
-    base.join(format!("coop-{sess_name}"))
 }
