@@ -1,0 +1,11 @@
+# Starter Hen manifest. Create it with:
+#   coop hen create examples/aria.yaml
+#
+# `provider_id` points at a secret stored in your sealed BYOK vault
+# (see docs/quickstart.md). Swap the model for whatever you have access to.
+spec_version: coop/v1
+name: aria
+brain:
+  provider_id: vault:byok-anthropic
+  model: claude-sonnet-4-5-20250929
+tools: [bash, file_read, file_write, http]

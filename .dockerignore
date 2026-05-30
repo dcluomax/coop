@@ -1,0 +1,6 @@
+target
+.git
+.github
+docs/screenshots
+*.md
+!README.md
