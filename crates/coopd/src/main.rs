@@ -192,10 +192,15 @@ async fn serve(data_dir: PathBuf, addr: String) -> Result<()> {
         .with_context(|| format!("binding {addr}"))?;
     info!(%addr, "coopd listening");
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .context("axum serve")?;
+    // ConnectInfo carries the peer SocketAddr so the login throttle can key on
+    // client IP.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .context("axum serve")?;
 
     orch.shutdown().await;
     info!("coopd stopped");

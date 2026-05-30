@@ -44,15 +44,15 @@ These controls land in the current source tree:
 | H6  | WebSocket frames capped (`/watch`: 64 KiB; `/shell`: 256 KiB).                |
 | M6  | Discord connector default-denies; only IDs in `COOP_DISCORD_ALLOWED_USERS` (or `allowed_user_ids` JSON field) can dispatch jobs. |
 | L1  | Farm UI's xterm.js + addon load with SRI (`integrity=sha384-…`).              |
+| M1  | **Anthropic API key heap-zeroized.** The BYOK key is held in `Zeroizing<String>` so its buffer is wiped when the adapter (and every clone) drops, and the adapter's `Debug` impl redacts it — the key never reaches logs or error strings. |
+| M3  | **Prompt length bound.** `submit_job` and `submit_task` reject prompts over `COOP_MAX_PROMPT_BYTES` (default 256 KiB; `0` disables) with HTTP 413, capping per-request memory so one client can't OOM the daemon. |
+| LR1 | **Login throttle.** `/api/v1/auth/login` records failed attempts per client IP; once an IP burns `COOP_LOGIN_MAX_ATTEMPTS` (default 10) failures within 60s it gets HTTP 429 + `Retry-After`, slowing token brute-forcing. A successful login clears the counter. Behind a reverse proxy this degrades to a global throttle (all requests share the proxy IP). |
 | LP1 | **Lease policy**. Leased hens can be pinned to a sandboxed CLI framework (`claude-code` / `codex` / `gh-copilot`) at manifest-validation time; insecure brains (`anthropic` in-process, raw `shell`) are refused for lease unless `lease.require_framework: false` is explicit. The farm owner declares `allowed_tools:` (subset of `tools:`) — for the in-process Anthropic brain this is a hard wall in `invoke_tool` (denied tools never execute and are also hidden from the brain's tool catalog). For CLI-framework hens the tool list is advisory: the hosted CLI governs its own tool calls (full `--allowedTools` plumbing is on the v0.2 roadmap). A `topic_filter` (case-insensitive plain-substring `deny_keywords` + `allow_keywords`; deny wins) is enforced **universally** on every leased prompt at `/api/v1/hens/:id/jobs` (HTTP 403) and at `/shell/send` / task dispatch (`PermissionDenied`). |
 
 ## Known limitations (still accepted for v0.1)
 
 - Farm UI loads xterm.js from a CDN (with SRI). Offline bundling is planned.
-- No rate-limit on `/api/v1/auth/login`.
-- Anthropic API key not zeroized on heap (M1).
 - Anthropic error bodies echoed to `/watch` subscribers (M2).
-- `submit_job` accepts unbounded prompt length (M3).
 - GitHub Actions are pinned by mutable tag (not commit SHA); release
   artifacts are unsigned. Sigstore signing is on the v0.2 roadmap (L2).
 

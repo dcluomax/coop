@@ -256,11 +256,23 @@ on `serenity` 0.12; runs only when explicitly enabled.
 ## 📍 Finding the farm from other devices
 
 By default `coopd` binds to `127.0.0.1:9700` — this device only. To let your
-phone, laptop, or Pi flock reach the farm on the LAN, bind to all interfaces:
+phone, laptop, or Pi flock reach the farm on the LAN, you need **two** things:
+bind to all interfaces, and tell coopd you're deliberately going public.
 
 ```bash
+# 1. set a bearer token (REQUIRED before exposing beyond loopback)
+export COOP_API_TOKEN="$(openssl rand -hex 32)"
+# 2. opt in to non-loopback Host/Origin headers, then bind publicly
+export COOP_PUBLIC=1
 coopd --data-dir ~/.coop/data serve --addr 0.0.0.0:9700
 ```
+
+> ⚠️ Without `COOP_PUBLIC=1`, coopd refuses any request whose `Host`/`Origin`
+> isn't loopback (C3/C4 — see [SECURITY.md](./SECURITY.md)), so a bare
+> `0.0.0.0` bind will reject every LAN request. And `COOP_PUBLIC=1` **without**
+> `COOP_API_TOKEN` leaves an unauthenticated farm open on your network — always
+> set the token first. Browsers reach the UI at `/login`; API clients send
+> `Authorization: Bearer <token>`.
 
 Then open the Farm UI, click ⚙️, and the **📍 Farm location** panel shows
 every reachable URL (hostname, each non-loopback IPv4) with a copy button.
@@ -304,6 +316,26 @@ OSS daemon has **zero** market awareness — the OSS build is fully usable on
 its own for single-farm and single-hen workflows.
 
 Need market functionality? Reach out to the maintainer.
+
+## ⚙️ Configuration
+
+`coopd` is configured entirely through environment variables (no config file).
+The most common knobs:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `COOP_DATA_DIR` | `~/.coop` | Data directory (vault, redb state, workdirs; `0700`). |
+| `COOP_LOG` | `info` | Tracing filter, e.g. `coopd=debug`. |
+| `COOP_API_TOKEN` | *(unset)* | Bearer token for the API/UI. **Required before exposing beyond loopback.** Unset = auth disabled. |
+| `COOP_PUBLIC` | *(unset)* | Set to `1` to accept non-loopback `Host`/`Origin` (needed for LAN/public binds). |
+| `COOP_LOGIN_MAX_ATTEMPTS` | `10` | Failed `/auth/login` attempts per IP per 60s before HTTP 429. |
+| `COOP_MAX_PROMPT_BYTES` | `262144` | Max job/task prompt size in bytes (`0` disables); over-size → HTTP 413. |
+| `COOP_VAULT` + `COOP_PASSPHRASE` | *(unset)* | Auto-unlock this vault at startup. |
+| `COOP_SANDBOX` | `1` | Set to `0` to disable the per-hen `bash` OS sandbox (not recommended). |
+| `COOP_MARKET_URL` | `https://farm.startcaas.com` | Public Market URL surfaced in the Farm UI. |
+
+Discord connector vars (`COOP_DISCORD_*`) are covered under
+[Discord connector](#-discord-connector-optional).
 
 ## 🛡️ Security
 
