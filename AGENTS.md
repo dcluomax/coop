@@ -77,7 +77,12 @@ grep -r "coopd_market\|coopd-market" crates/ scripts/ .github/
 | `crates/coopd-tools/` | OSS | bash/file_*/http tool registry |
 | `crates/coopd-brain/` | OSS | Anthropic adapter |
 | `crates/coop-cli/` | OSS | `coop` CLI binary |
+| `scripts/install.sh` | OSS | `curl \| sh` binary installer (platform-detecting) |
 | `scripts/e2e.sh`, `scripts/farm-demo.sh` | OSS | OSS-only demos |
+| `Dockerfile`, `docker-compose.yml`, `.dockerignore` | OSS | Container deploy |
+| `contrib/systemd/coopd.service`, `contrib/coop.env.example` | OSS | systemd deploy |
+| `examples/aria.yaml` | OSS | Starter Hen manifest |
+| `docs/*.md` | OSS | Quickstart, deployment, configuration, discord |
 | `../coop-market/` | **PRIVATE** | `coopd-market` crate + `market-demo.sh` |
 
 ## Development loop (per the Sprint from gstack)

@@ -1,0 +1,29 @@
+# Coop daemon — one-command deploy.
+#
+#   COOP_API_TOKEN=$(openssl rand -hex 32) docker compose up -d
+#
+# Data (sealed vault, redb state, hen workdirs) persists in the `coop-data`
+# volume. The daemon binds 0.0.0.0 inside the container; COOP_PUBLIC=1 lets it
+# accept the non-loopback Host header the published port arrives with — so you
+# MUST set COOP_API_TOKEN or you'll expose an unauthenticated farm.
+services:
+  coopd:
+    build: .
+    image: ghcr.io/dcluomax/coop:latest
+    container_name: coopd
+    restart: unless-stopped
+    ports:
+      - "9700:9700"
+    volumes:
+      - coop-data:/data
+    environment:
+      COOP_DATA_DIR: /data
+      COOP_PUBLIC: "1"
+      # REQUIRED. Generate once: openssl rand -hex 32
+      COOP_API_TOKEN: "${COOP_API_TOKEN:?set COOP_API_TOKEN before starting}"
+      # Optional: auto-unlock a vault baked into the volume.
+      # COOP_VAULT: /data/vault.json
+      # COOP_PASSPHRASE: "${COOP_PASSPHRASE:-}"
+
+volumes:
+  coop-data:
