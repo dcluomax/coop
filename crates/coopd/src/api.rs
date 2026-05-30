@@ -16,6 +16,32 @@ use crate::location;
 use crate::orchestrator::OrchHandle;
 use crate::tasks::TaskService;
 
+/// Default upper bound on a single prompt's byte length (M3). Bounds memory
+/// per job so a single client cannot exhaust the daemon with one giant request.
+/// Override with `COOP_MAX_PROMPT_BYTES` (0 disables the check).
+const DEFAULT_MAX_PROMPT_BYTES: usize = 256 * 1024;
+
+/// Effective prompt byte cap, read from `COOP_MAX_PROMPT_BYTES` (default
+/// [`DEFAULT_MAX_PROMPT_BYTES`]). A value of `0` disables the limit.
+fn max_prompt_bytes() -> usize {
+    std::env::var("COOP_MAX_PROMPT_BYTES")
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .unwrap_or(DEFAULT_MAX_PROMPT_BYTES)
+}
+
+/// Reject prompts larger than the configured cap (M3).
+fn check_prompt_len(prompt: &str) -> Result<(), AppError> {
+    let max = max_prompt_bytes();
+    if max != 0 && prompt.len() > max {
+        return Err(AppError::payload_too_large(format!(
+            "prompt is {} bytes; limit is {max} (set COOP_MAX_PROMPT_BYTES to adjust)",
+            prompt.len()
+        )));
+    }
+    Ok(())
+}
+
 /// Build the HTTP router.
 pub fn router(
     orch: OrchHandle,
@@ -231,6 +257,7 @@ async fn submit_job(
     Json(body): Json<JobBody>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     let id = HenId::parse(&id).map_err(|e| AppError::bad_request(e.to_string()))?;
+    check_prompt_len(&body.prompt)?;
     // Topic filter: if the hen is currently leased and the manifest defines
     // a topic_filter, every prompt must pass it before dispatch.
     if let Ok(hen) = orch.get_hen(id.clone()).await {
@@ -422,6 +449,7 @@ async fn submit_task(
     if body.prompt.trim().is_empty() {
         return Err(AppError::bad_request("prompt is empty"));
     }
+    check_prompt_len(&body.prompt)?;
     let id = svc.submit(body.prompt, body.required_agent_kind).await;
     Ok((
         StatusCode::ACCEPTED,
@@ -507,6 +535,12 @@ impl AppError {
     fn forbidden(msg: impl Into<String>) -> Self {
         Self {
             status: StatusCode::FORBIDDEN,
+            message: msg.into(),
+        }
+    }
+    fn payload_too_large(msg: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::PAYLOAD_TOO_LARGE,
             message: msg.into(),
         }
     }

@@ -16,19 +16,81 @@
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Request, State},
+    extract::{ConnectInfo, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::{self, Next},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::net::IpAddr;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+/// Per-IP fixed-window throttle on failed `/api/v1/auth/login` attempts.
+///
+/// Slows down token brute-forcing: once an IP records `max_attempts` failures
+/// within `window`, further attempts are refused with HTTP 429 until the
+/// window rolls over. A successful login clears the counter for that IP.
+/// Behind a reverse proxy every request shares the proxy's IP, so the throttle
+/// degrades to a global rate limit — still the desired brute-force brake.
+#[derive(Debug)]
+pub struct LoginLimiter {
+    window: Duration,
+    max_attempts: u32,
+    state: Mutex<HashMap<IpAddr, (Instant, u32)>>,
+}
+
+impl LoginLimiter {
+    fn from_env() -> Self {
+        let max_attempts = std::env::var("COOP_LOGIN_MAX_ATTEMPTS")
+            .ok()
+            .and_then(|s| s.trim().parse::<u32>().ok())
+            .filter(|n| *n > 0)
+            .unwrap_or(10);
+        Self {
+            window: Duration::from_secs(60),
+            max_attempts,
+            state: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// `true` if `ip` is still under the failure budget for the current window.
+    fn allowed(&self, ip: IpAddr) -> bool {
+        let map = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        match map.get(&ip) {
+            Some((start, count)) if start.elapsed() < self.window => *count < self.max_attempts,
+            _ => true,
+        }
+    }
+
+    /// Record a failed attempt for `ip`, rolling the window if it expired.
+    fn record_failure(&self, ip: IpAddr) {
+        let now = Instant::now();
+        let mut map = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        // Opportunistically prune stale windows so the map can't grow forever.
+        map.retain(|_, (start, _)| now.duration_since(*start) < self.window);
+        let entry = map.entry(ip).or_insert((now, 0));
+        if now.duration_since(entry.0) >= self.window {
+            *entry = (now, 1);
+        } else {
+            entry.1 = entry.1.saturating_add(1);
+        }
+    }
+
+    /// Clear an IP's failure counter after a successful login.
+    fn clear(&self, ip: IpAddr) {
+        let mut map = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        map.remove(&ip);
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct AuthConfig {
     /// `None` = auth disabled. `Some(token)` = require this token.
     token: Option<Arc<String>>,
+    limiter: Arc<LoginLimiter>,
 }
 
 impl AuthConfig {
@@ -38,7 +100,10 @@ impl AuthConfig {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .map(Arc::new);
-        Self { token }
+        Self {
+            token,
+            limiter: Arc::new(LoginLimiter::from_env()),
+        }
     }
 
     pub fn enabled(&self) -> bool {
@@ -218,7 +283,11 @@ async fn status(State(cfg): State<AuthConfig>, headers: HeaderMap) -> Json<Statu
     })
 }
 
-async fn login(State(cfg): State<AuthConfig>, Json(body): Json<LoginBody>) -> Response {
+async fn login(
+    State(cfg): State<AuthConfig>,
+    ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
+    Json(body): Json<LoginBody>,
+) -> Response {
     if !cfg.enabled() {
         return (
             StatusCode::OK,
@@ -226,13 +295,25 @@ async fn login(State(cfg): State<AuthConfig>, Json(body): Json<LoginBody>) -> Re
         )
             .into_response();
     }
+    let ip = peer.ip();
+    // Brute-force brake: refuse once an IP burns its failure budget (M-login).
+    if !cfg.limiter.allowed(ip) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            [(header::RETRY_AFTER, "60")],
+            Json(serde_json::json!({"error": "too many login attempts; try again later"})),
+        )
+            .into_response();
+    }
     if !cfg.matches(&body.token) {
+        cfg.limiter.record_failure(ip);
         return (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({"error": "invalid token"})),
         )
             .into_response();
     }
+    cfg.limiter.clear(ip);
     // 30-day session cookie. HttpOnly + SameSite=Lax. Secure flag is set if the
     // request arrives over HTTPS (which is true behind Cloudflare).
     let cookie = format!(
@@ -278,7 +359,10 @@ mod tests {
     #[test]
     fn disabled_when_env_empty() {
         // Cannot rely on env in tests; just verify the struct path.
-        let cfg = AuthConfig { token: None };
+        let cfg = AuthConfig {
+            token: None,
+            limiter: Arc::new(LoginLimiter::from_env()),
+        };
         assert!(!cfg.enabled());
         assert!(cfg.matches("anything"));
     }
@@ -287,10 +371,32 @@ mod tests {
     fn enabled_matches_only_exact() {
         let cfg = AuthConfig {
             token: Some(Arc::new("s3cret".into())),
+            limiter: Arc::new(LoginLimiter::from_env()),
         };
         assert!(cfg.enabled());
         assert!(cfg.matches("s3cret"));
         assert!(!cfg.matches("wrong"));
+    }
+
+    #[test]
+    fn login_limiter_blocks_after_budget() {
+        let ip: IpAddr = "203.0.113.7".parse().unwrap();
+        let lim = LoginLimiter {
+            window: Duration::from_secs(60),
+            max_attempts: 3,
+            state: Mutex::new(HashMap::new()),
+        };
+        assert!(lim.allowed(ip));
+        for _ in 0..3 {
+            lim.record_failure(ip);
+        }
+        assert!(!lim.allowed(ip), "should block after exhausting budget");
+        // A different IP is unaffected.
+        let other: IpAddr = "203.0.113.8".parse().unwrap();
+        assert!(lim.allowed(other));
+        // Success clears the counter.
+        lim.clear(ip);
+        assert!(lim.allowed(ip));
     }
 
     #[test]

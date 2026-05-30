@@ -12,14 +12,29 @@ use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::debug;
+use zeroize::Zeroizing;
 
 /// Anthropic Messages API adapter.
-#[derive(Debug, Clone)]
+///
+/// The BYOK `api_key` is held in [`Zeroizing`] so its heap buffer is wiped
+/// when the adapter (and every clone) is dropped (M1), and the [`Debug`] impl
+/// redacts it so the key never reaches logs or error messages.
+#[derive(Clone)]
 pub struct Anthropic {
-    api_key: String,
+    api_key: Zeroizing<String>,
     base_url: String,
     model: String,
     client: reqwest::Client,
+}
+
+impl std::fmt::Debug for Anthropic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Anthropic")
+            .field("api_key", &"<redacted>")
+            .field("base_url", &self.base_url)
+            .field("model", &self.model)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Anthropic {
@@ -38,7 +53,7 @@ impl Anthropic {
             .build()
             .expect("reqwest client");
         Self {
-            api_key,
+            api_key: Zeroizing::new(api_key),
             base_url: "https://api.anthropic.com".to_string(),
             model,
             client,
@@ -134,7 +149,7 @@ impl BrainAdapter for Anthropic {
         let resp = self
             .client
             .post(format!("{}/v1/messages", self.base_url))
-            .header("x-api-key", &self.api_key)
+            .header("x-api-key", self.api_key.as_str())
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
             .json(&body)
