@@ -1,0 +1,41 @@
+# Coop daemon as a systemd service. Install:
+#
+#   sudo useradd --system --create-home --home-dir /var/lib/coop coop
+#   sudo install -Dm644 contrib/systemd/coopd.service /etc/systemd/system/coopd.service
+#   sudo install -Dm640 contrib/coop.env.example /etc/coop/coop.env   # then edit
+#   sudo chown root:coop /etc/coop/coop.env
+#   sudo systemctl daemon-reload && sudo systemctl enable --now coopd
+#
+# Tail logs:  journalctl -u coopd -f
+[Unit]
+Description=Coop agent farm daemon
+Documentation=https://github.com/dcluomax/coop
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=coop
+Group=coop
+EnvironmentFile=/etc/coop/coop.env
+# COOP_ADDR comes from the EnvironmentFile (default 127.0.0.1:9700).
+ExecStart=/usr/local/bin/coopd serve --addr ${COOP_ADDR}
+Restart=on-failure
+RestartSec=3
+
+# State lives in /var/lib/coop (systemd creates + owns it).
+StateDirectory=coop
+Environment=COOP_DATA_DIR=/var/lib/coop
+
+# Hardening.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/coop
+
+[Install]
+WantedBy=multi-user.target
