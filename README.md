@@ -36,6 +36,8 @@ One static binary: no Python, no Docker required.
 | 🏡 **Self-hosted** | Your hardware, your agents, your data. No mandatory cloud. |
 | 🔐 **BYOK vault** | Sealed `xchacha20poly1305` vault for your model keys. Locked at rest. |
 | 🤖 **Real autonomy** | Hens get a sandboxed PTY shell, a tool ABI, and an Anthropic brain. |
+| 🧱 **Per-hen isolation** | Each hen runs in its own OS sandbox (macOS Seatbelt / Linux Bubblewrap) — confined to its workdir, scrubbed env, siblings unreadable. |
+| 🌐 **Network egress policy** | Per-hen `network:` block — `off` / `allowlist` / `open`. Fail-closed: a hen that can't enforce its policy refuses to hatch. |
 | 🖥️ **Live shell** | Click any hen in the Farm UI to drop into a real terminal in its workdir. |
 | 🍓 **Runs on a Pi** | First-class binaries for Raspberry Pi 3/4/5 + Pi Zero 2. |
 | ⚡ **One static binary** | `coopd` daemon + `coop` CLI. No runtime deps. |
@@ -116,6 +118,7 @@ login`, inspect generated files, or troubleshoot a stuck job.
 | [Quickstart](./docs/quickstart.md) | Install → vault → first Hen → first job |
 | [Deployment](./docs/deployment.md) | Docker · Compose · systemd · LAN/public |
 | [Configuration](./docs/configuration.md) | Every environment variable |
+| [Network isolation](./docs/net-isolation.md) | Per-hen sandbox + egress policy (`off`/`allowlist`/`open`) |
 | [Discord connector](./docs/discord.md) | One channel per chicken |
 | [Decisions](./DECISIONS.md) · [Launch](./LAUNCH.md) · [Changelog](./CHANGELOG.md) | Roadmap & rationale |
 | [Security](./SECURITY.md) | Threat model & private advisory flow |
