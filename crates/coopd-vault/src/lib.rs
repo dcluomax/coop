@@ -7,8 +7,16 @@
 //!
 //! v0.1 implements the minimum needed for BYOK Anthropic keys. TPM /
 //! hardware-key integration is deferred.
+//!
+//! In addition to the local sealed file vault, an optional [`azure`] backend
+//! resolves secrets from **Azure Key Vault** for farmers who centralize their
+//! model keys there (provider IDs of the form `azure-kv://<vault>/<secret>`).
 
 #![warn(missing_docs)]
+
+pub mod azure;
+
+pub use azure::{AzureError, AzureKeyVault, AzureSecretRef};
 
 use std::path::{Path, PathBuf};
 

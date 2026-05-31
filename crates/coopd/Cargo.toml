@@ -41,6 +41,7 @@ time = { workspace = true }
 uuid = { workspace = true }
 dashmap = { workspace = true }
 parking_lot = { workspace = true }
+once_cell = { workspace = true }
 portable-pty = { workspace = true }
 if-addrs = { workspace = true }
 

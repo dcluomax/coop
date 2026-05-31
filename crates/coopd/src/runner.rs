@@ -57,7 +57,7 @@ async fn run_job(
         let manifest = hen.manifest.clone();
         let brain = {
             let bf = brain_factory.lock().await;
-            bf.build(&manifest)?
+            bf.build(&manifest).await?
         };
         let workdir = workdir_base.join(hen.id.workdir_key());
         tokio::fs::create_dir_all(&workdir)
