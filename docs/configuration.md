@@ -40,5 +40,14 @@ See [discord.md](./discord.md).
 ## CLI
 
 The `coop` CLI talks to `COOP_API` (default `http://127.0.0.1:9700`). Set it to
-reach a remote daemon, and pass the bearer token via `?token=` or an
-`Authorization` header when auth is enabled.
+reach a remote daemon. When the daemon has auth enabled, give the CLI the same
+token via `COOP_API_TOKEN` (env) or `--token <TOKEN>`; it is sent as an
+`Authorization: Bearer` header. An empty/unset token sends no auth header,
+matching a daemon started without `COOP_API_TOKEN`.
+
+```sh
+export COOP_API=https://farm.example.com
+export COOP_API_TOKEN=…   # same value the daemon was started with
+coop farm
+coop hen list
+```
