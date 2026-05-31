@@ -223,6 +223,34 @@ async fn hatch_hen(
     Path(id): Path<String>,
 ) -> Result<Json<OkBody>, AppError> {
     let id = HenId::parse(&id).map_err(|e| AppError::bad_request(e.to_string()))?;
+    // Fail-closed network policy gate: a hen that requests a policy stricter
+    // than `open` must run on a host that can enforce it. We refuse to hatch
+    // rather than silently downgrade to open egress. See docs/net-isolation.md.
+    let hen = orch.get_hen(id.clone()).await?;
+    if let Some(net) = &hen.manifest.network {
+        if net.policy.requires_enforcement() {
+            if !coopd_tools::sandbox::net_isolation_available() {
+                return Err(AppError::forbidden(format!(
+                    "refusing to hatch {id}: network policy `{}` cannot be enforced on this host \
+                     (no user namespaces / Seatbelt). Set network.policy: open to run without \
+                     egress isolation, or run on a supported host.",
+                    net.policy.as_str()
+                )));
+            }
+            // tmux-hosted CLI agents are a network egress surface equal to bash
+            // but are not yet wrapped in the per-hen sandbox (v1 limitation).
+            // Fail closed for them under any strict policy.
+            if hen.manifest.agent_kind.is_tmux_agent() {
+                return Err(AppError::forbidden(format!(
+                    "refusing to hatch {id}: network policy `{}` is not yet enforceable for \
+                     agent_kind `{}` (tmux CLI agents are an unconfined egress surface in v1). \
+                     Use agent_kind: anthropic, or network.policy: open.",
+                    net.policy.as_str(),
+                    hen.manifest.agent_kind.as_str()
+                )));
+            }
+        }
+    }
     orch.transition_hen(id.clone(), HenState::Hatching).await?;
     orch.transition_hen(id, HenState::Idle).await?;
     Ok(Json(OkBody { ok: true }))

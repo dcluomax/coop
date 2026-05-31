@@ -102,6 +102,41 @@ pub async fn validate_url(url: &str) -> Result<()> {
     Ok(())
 }
 
+/// Enforce a per-hen [`ResolvedNetPolicy`] against a URL (L7 host+port
+/// allowlist). This is the in-process counterpart to the OS network sandbox:
+/// it gates the `http` tool, which runs with the daemon's privileges.
+///
+/// - `open` → permitted (the SSRF guard in [`validate_url`] still applies).
+/// - `off` → always refused.
+/// - `allowlist` → refused unless the URL's host+port matches an allow entry.
+///
+/// # Errors
+///
+/// Returns [`CoreError::Other`] when the URL cannot be parsed or the policy
+/// denies the egress.
+pub fn enforce_policy(policy: &coopd_core::ResolvedNetPolicy, url: &str) -> Result<()> {
+    use coopd_core::NetPolicy;
+    if policy.policy() == NetPolicy::Open {
+        return Ok(());
+    }
+    let parsed =
+        reqwest::Url::parse(url).map_err(|e| CoreError::Other(format!("invalid url: {e}")))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| CoreError::Other("url has no host".into()))?;
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| CoreError::Other("url has no port".into()))?;
+    if policy.host_allowed(host, port) {
+        Ok(())
+    } else {
+        Err(CoreError::Other(format!(
+            "network policy ({}) denies egress to {host}:{port}",
+            policy.policy().as_str()
+        )))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

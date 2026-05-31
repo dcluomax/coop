@@ -49,6 +49,10 @@ pub struct AgentManifest {
     /// Lease configuration (v0.4+).
     #[serde(default)]
     pub lease: Option<LeaseSpec>,
+    /// Per-hen network egress policy (v0.5+). Absent = `open` (backward
+    /// compatible) with a one-time deprecation warning at hatch time.
+    #[serde(default)]
+    pub network: Option<crate::net::NetworkSpec>,
     /// Free-form metadata (Coop does not parse).
     #[serde(default)]
     pub metadata: HashMap<String, serde_yaml::Value>,
@@ -371,6 +375,7 @@ impl AgentManifest {
             resources: None,
             scheduling: None,
             lease: None,
+            network: None,
             metadata: HashMap::new(),
         }
     }
@@ -446,10 +451,11 @@ impl AgentManifest {
                 }
             }
         }
+        if let Some(net) = &self.network {
+            net.validate()?;
+        }
         Ok(())
     }
-
-    /// Serialize this manifest back to YAML.
     ///
     /// # Errors
     ///
@@ -477,6 +483,52 @@ tools: [bash, file_read]
         let m = AgentManifest::parse_yaml(yaml).unwrap();
         assert_eq!(m.name, "aria");
         assert_eq!(m.tools.len(), 2);
+        // No network block => None => resolves to open (backward compatible).
+        assert!(m.network.is_none());
+    }
+
+    #[test]
+    fn parses_network_allowlist_block() {
+        let yaml = r#"
+spec_version: coop/v1
+name: aria
+brain:
+  provider_id: vault:byok-anthropic-01
+  model: claude-sonnet-4.6
+tools: [bash, http]
+network:
+  policy: allowlist
+  allow:
+    - host: api.anthropic.com
+      ports: [443]
+    - host: "*.githubusercontent.com"
+"#;
+        let m = AgentManifest::parse_yaml(yaml).unwrap();
+        let net = m.network.as_ref().unwrap();
+        assert_eq!(net.policy, crate::net::NetPolicy::Allowlist);
+        assert_eq!(net.allow.len(), 2);
+        // ports default to [443] when omitted.
+        assert_eq!(net.allow[1].ports, vec![443]);
+        let resolved = crate::net::ResolvedNetPolicy::from_spec(m.network.as_ref());
+        assert!(resolved.host_allowed("raw.githubusercontent.com", 443));
+        assert!(!resolved.host_allowed("evil.com", 443));
+    }
+
+    #[test]
+    fn rejects_network_allow_on_open_policy() {
+        let yaml = r#"
+spec_version: coop/v1
+name: aria
+brain:
+  provider_id: vault:byok-anthropic-01
+  model: claude-sonnet-4.6
+tools: [http]
+network:
+  policy: open
+  allow:
+    - host: api.anthropic.com
+"#;
+        assert!(AgentManifest::parse_yaml(yaml).is_err());
     }
 
     #[test]

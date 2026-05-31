@@ -234,6 +234,7 @@ async fn invoke_tool(
         session_id: job.id.clone(),
         lease_id,
         workdir: workdir.to_path_buf(),
+        net_policy: coopd_core::ResolvedNetPolicy::from_spec(hen.manifest.network.as_ref()),
         deadline: Instant::now() + Duration::from_secs(120),
     };
     debug!(tool = name, %job.id, "invoking tool");

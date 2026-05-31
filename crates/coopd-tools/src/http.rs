@@ -103,7 +103,7 @@ impl CoopTool for Http {
             examples: vec![],
         }
     }
-    async fn invoke(&self, _ctx: &ToolCtx, input: Value) -> Result<Value> {
+    async fn invoke(&self, ctx: &ToolCtx, input: Value) -> Result<Value> {
         let inp: Input = serde_json::from_value(input)?;
         let method = reqwest::Method::from_bytes(inp.method.as_bytes())
             .map_err(|e| CoreError::Other(format!("invalid method: {e}")))?;
@@ -111,6 +111,10 @@ impl CoopTool for Http {
         let mut current_url = inp.url.clone();
         let mut hops = 0usize;
         let resp = loop {
+            // Per-hen network policy (L7): off => deny; allowlist => host+port
+            // must match. `open` falls through to the SSRF guard below. This is
+            // enforced for the initial URL *and* every redirect target.
+            crate::safe_net::enforce_policy(&ctx.net_policy, &current_url)?;
             crate::safe_net::validate_url(&current_url).await?;
             let mut req = self.client.request(method.clone(), &current_url);
             for (k, v) in &inp.headers {
@@ -201,5 +205,57 @@ mod tests {
             .await
             .unwrap_err();
         assert!(format!("{err}").contains("scheme"));
+    }
+
+    fn ctx_with_policy(p: coopd_core::ResolvedNetPolicy) -> ToolCtx {
+        ToolCtx {
+            agent_id: "alice.coop/aria".into(),
+            session_id: "test".into(),
+            lease_id: None,
+            workdir: std::env::temp_dir(),
+            net_policy: p,
+            deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
+        }
+    }
+
+    #[tokio::test]
+    async fn off_policy_denies_http_tool() {
+        let h = Http::new();
+        let policy = coopd_core::ResolvedNetPolicy::from_spec(Some(&coopd_core::NetworkSpec {
+            policy: coopd_core::NetPolicy::Off,
+            allow: vec![],
+        }));
+        let err = h
+            .invoke(
+                &ctx_with_policy(policy),
+                json!({ "url": "https://example.com/" }),
+            )
+            .await
+            .unwrap_err();
+        // Denied by policy BEFORE any DNS/connect happens (hermetic).
+        assert!(format!("{err}").contains("network policy"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn allowlist_policy_denies_unlisted_host() {
+        let h = Http::new();
+        let policy = coopd_core::ResolvedNetPolicy::from_spec(Some(&coopd_core::NetworkSpec {
+            policy: coopd_core::NetPolicy::Allowlist,
+            allow: vec![coopd_core::NetAllow {
+                host: "api.anthropic.com".into(),
+                ports: vec![443],
+            }],
+        }));
+        let err = h
+            .invoke(
+                &ctx_with_policy(policy),
+                json!({ "url": "https://evil.example.com/" }),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{err}").contains("network policy"),
+            "unlisted host should be denied, got: {err}"
+        );
     }
 }
