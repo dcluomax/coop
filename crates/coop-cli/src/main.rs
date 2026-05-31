@@ -27,12 +27,34 @@ fn enc(id: &str) -> String {
     out
 }
 
+/// Attach `Authorization: Bearer <token>` to a request when a token is set.
+///
+/// An empty token (the default) leaves the request unauthenticated, matching a
+/// coopd started without `COOP_API_TOKEN`.
+fn auth(rb: reqwest::RequestBuilder, token: &str) -> reqwest::RequestBuilder {
+    if token.is_empty() {
+        rb
+    } else {
+        rb.bearer_auth(token)
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "coop", version, about = "Coop CLI")]
 struct Cli {
     /// coopd API base URL.
     #[arg(long, env = "COOP_API", default_value = "http://127.0.0.1:9700")]
     api: String,
+
+    /// Bearer token for an auth-enabled coopd (matches the daemon's
+    /// `COOP_API_TOKEN`). Empty means send no `Authorization` header.
+    #[arg(
+        long,
+        env = "COOP_API_TOKEN",
+        default_value = "",
+        hide_env_values = true
+    )]
+    token: String,
 
     /// Logging filter.
     #[arg(long, env = "COOP_LOG", default_value = "warn")]
@@ -170,27 +192,34 @@ async fn main() -> Result<()> {
 
     match cli.cmd {
         Cmd::Health => {
-            let v: Value = reqwest::get(format!("{}/api/v1/healthz", cli.api))
-                .await?
-                .json()
-                .await?;
+            let client = reqwest::Client::new();
+            let v: Value = auth(
+                client.get(format!("{}/api/v1/healthz", cli.api)),
+                &cli.token,
+            )
+            .send()
+            .await?
+            .json()
+            .await?;
             println!("{v}");
         }
         Cmd::Farm => {
-            let v: Value = reqwest::get(format!("{}/api/v1/farm", cli.api))
+            let client = reqwest::Client::new();
+            let v: Value = auth(client.get(format!("{}/api/v1/farm", cli.api)), &cli.token)
+                .send()
                 .await?
                 .json()
                 .await?;
             println!("{}", serde_json::to_string_pretty(&v)?);
         }
-        Cmd::Hen { cmd } => hen_cmd(&cli.api, cmd).await?,
-        Cmd::Job { cmd } => job_cmd(&cli.api, cmd).await?,
+        Cmd::Hen { cmd } => hen_cmd(&cli.api, &cli.token, cmd).await?,
+        Cmd::Job { cmd } => job_cmd(&cli.api, &cli.token, cmd).await?,
         Cmd::Vault { cmd } => vault_cmd(cmd).await?,
     }
     Ok(())
 }
 
-async fn hen_cmd(api: &str, cmd: HenCmd) -> Result<()> {
+async fn hen_cmd(api: &str, token: &str, cmd: HenCmd) -> Result<()> {
     let client = reqwest::Client::new();
     match cmd {
         HenCmd::List { state } => {
@@ -199,12 +228,11 @@ async fn hen_cmd(api: &str, cmd: HenCmd) -> Result<()> {
             } else {
                 format!("{api}/api/v1/hens")
             };
-            let v: Value = client.get(&url).send().await?.json().await?;
+            let v: Value = auth(client.get(&url), token).send().await?.json().await?;
             println!("{}", serde_json::to_string_pretty(&v)?);
         }
         HenCmd::Get { id } => {
-            let v: Value = client
-                .get(format!("{api}/api/v1/hens/{}", enc(&id)))
+            let v: Value = auth(client.get(format!("{api}/api/v1/hens/{}", enc(&id))), token)
                 .send()
                 .await?
                 .json()
@@ -214,8 +242,7 @@ async fn hen_cmd(api: &str, cmd: HenCmd) -> Result<()> {
         HenCmd::Create { file } => {
             let yaml = std::fs::read_to_string(&file)
                 .with_context(|| format!("reading {}", file.display()))?;
-            let resp = client
-                .post(format!("{api}/api/v1/hens"))
+            let resp = auth(client.post(format!("{api}/api/v1/hens")), token)
                 .header("content-type", "application/yaml")
                 .body(yaml)
                 .send()
@@ -227,25 +254,35 @@ async fn hen_cmd(api: &str, cmd: HenCmd) -> Result<()> {
             }
             println!("{}", serde_json::to_string_pretty(&body)?);
         }
-        HenCmd::Hatch { id } => simple_post(&client, api, &id, "hatch").await?,
-        HenCmd::Sleep { id } => simple_post(&client, api, &id, "sleep").await?,
-        HenCmd::Wake { id } => simple_post(&client, api, &id, "wake").await?,
+        HenCmd::Hatch { id } => simple_post(&client, api, token, &id, "hatch").await?,
+        HenCmd::Sleep { id } => simple_post(&client, api, token, &id, "sleep").await?,
+        HenCmd::Wake { id } => simple_post(&client, api, token, &id, "wake").await?,
         HenCmd::Delete { id } => {
-            let resp = client
-                .delete(format!("{api}/api/v1/hens/{}", enc(&id)))
-                .send()
-                .await?;
+            let resp = auth(
+                client.delete(format!("{api}/api/v1/hens/{}", enc(&id))),
+                token,
+            )
+            .send()
+            .await?;
             println!("status: {}", resp.status());
         }
     }
     Ok(())
 }
 
-async fn simple_post(client: &reqwest::Client, api: &str, id: &str, action: &str) -> Result<()> {
-    let resp = client
-        .post(format!("{api}/api/v1/hens/{}/{action}", enc(id)))
-        .send()
-        .await?;
+async fn simple_post(
+    client: &reqwest::Client,
+    api: &str,
+    token: &str,
+    id: &str,
+    action: &str,
+) -> Result<()> {
+    let resp = auth(
+        client.post(format!("{api}/api/v1/hens/{}/{action}", enc(id))),
+        token,
+    )
+    .send()
+    .await?;
     let status = resp.status();
     let body: Value = resp.json().await.unwrap_or_else(|_| serde_json::json!({}));
     if !status.is_success() {
@@ -255,15 +292,17 @@ async fn simple_post(client: &reqwest::Client, api: &str, id: &str, action: &str
     Ok(())
 }
 
-async fn job_cmd(api: &str, cmd: JobCmd) -> Result<()> {
+async fn job_cmd(api: &str, token: &str, cmd: JobCmd) -> Result<()> {
     let client = reqwest::Client::new();
     match cmd {
         JobCmd::Run { hen_id, prompt } => {
-            let resp = client
-                .post(format!("{api}/api/v1/hens/{}/jobs", enc(&hen_id)))
-                .json(&serde_json::json!({ "prompt": prompt }))
-                .send()
-                .await?;
+            let resp = auth(
+                client.post(format!("{api}/api/v1/hens/{}/jobs", enc(&hen_id))),
+                token,
+            )
+            .json(&serde_json::json!({ "prompt": prompt }))
+            .send()
+            .await?;
             let status = resp.status();
             let body: Value = resp.json().await?;
             if !status.is_success() {
@@ -272,8 +311,7 @@ async fn job_cmd(api: &str, cmd: JobCmd) -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&body)?);
         }
         JobCmd::Get { id } => {
-            let v: Value = client
-                .get(format!("{api}/api/v1/jobs/{id}"))
+            let v: Value = auth(client.get(format!("{api}/api/v1/jobs/{id}")), token)
                 .send()
                 .await?
                 .json()
@@ -286,7 +324,7 @@ async fn job_cmd(api: &str, cmd: JobCmd) -> Result<()> {
             } else {
                 format!("{api}/api/v1/jobs")
             };
-            let v: Value = client.get(&url).send().await?.json().await?;
+            let v: Value = auth(client.get(&url), token).send().await?.json().await?;
             println!("{}", serde_json::to_string_pretty(&v)?);
         }
         JobCmd::Wait {
@@ -296,8 +334,7 @@ async fn job_cmd(api: &str, cmd: JobCmd) -> Result<()> {
         } => {
             let start = std::time::Instant::now();
             loop {
-                let v: Value = client
-                    .get(format!("{api}/api/v1/jobs/{id}"))
+                let v: Value = auth(client.get(format!("{api}/api/v1/jobs/{id}")), token)
                     .send()
                     .await?
                     .json()
