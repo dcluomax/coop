@@ -56,6 +56,36 @@ The unit ([`contrib/systemd/coopd.service`](../contrib/systemd/coopd.service))
 runs as an unprivileged `coop` user with `ProtectSystem=strict`, keeps state in
 `/var/lib/coop`, and restarts on failure.
 
+## Behind a reverse proxy / tunnel
+
+Fronting `coopd` with nginx, Caddy, or a Cloudflare/`cloudflared` tunnel
+(public hostname → container) has two requirements that are easy to miss:
+
+1. **The proxy must be able to reach the daemon.** With Docker, put the proxy
+   and `coopd` on the **same network** — otherwise the proxy resolves the
+   service name to nothing and returns `502 Bad Gateway`:
+
+   ```bash
+   docker network connect <proxy-net> coopd
+   # or, in compose, list the shared network under the coopd service:
+   #   networks: [default, <proxy-net>]
+   ```
+
+2. **Set `COOP_PUBLIC=1`.** The proxy forwards a public `Host`/`Origin`
+   (e.g. `farm.example.com`), which the loopback allowlist rejects with `403`
+   until you opt in. Keep `COOP_API_TOKEN` set — `COOP_PUBLIC=1` only relaxes
+   the `Host`/`Origin` check, it does **not** disable auth.
+
+The public hostname also needs a DNS record pointing at the proxy/tunnel; a
+missing record surfaces as `NXDOMAIN` / connection failures, not a `coopd`
+error. Verify the chain end to end:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://farm.example.com/api/v1/healthz   # 200 (exempt)
+curl -s -o /dev/null -w '%{http_code}\n' https://farm.example.com/                 # 401 (auth works)
+curl -s -o /dev/null -w '%{http_code}\n' "https://farm.example.com/?token=$TOKEN"  # 200 (UI loads)
+```
+
 ## Reaching the farm from other devices
 
 Once bound to `0.0.0.0` with `COOP_PUBLIC=1` + a token, open the Farm UI, click
