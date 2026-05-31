@@ -1,25 +1,35 @@
 //! Brain factory: builds a `BrainAdapter` for a given Hen manifest.
 //!
-//! Resolves `manifest.brain.provider_id` of the form `vault:<secret-name>` to
-//! an Anthropic API key loaded from the unlocked vault.
+//! Resolves `manifest.brain.provider_id` to an Anthropic API key. Two schemes
+//! are supported:
+//!
+//! * `vault:<secret-name>` — read from the unlocked local sealed vault.
+//! * `azure-kv://<vault>/<secret>[/<version>]` — fetch from Azure Key Vault
+//!   (credentials from the environment; see [`coopd_vault::azure`]).
 
 use std::sync::Arc;
 
 use coopd_brain::{Anthropic, CachingBrain, RoutingBrain, router::models};
 use coopd_core::{AgentManifest, BrainAdapter, CoreError, Result};
-use coopd_vault::Vault;
+use coopd_vault::{AzureKeyVault, AzureSecretRef, Vault};
+use once_cell::sync::OnceCell;
 
 /// Builds brain adapters by resolving manifests against the vault.
 #[derive(Debug)]
 pub struct BrainFactory {
     vault: Option<Vault>,
+    /// Lazily-initialised Azure Key Vault client (built from env on first use).
+    azure: OnceCell<AzureKeyVault>,
 }
 
 impl BrainFactory {
     /// Construct with an optional unlocked vault.
     #[must_use]
     pub fn new(vault: Option<Vault>) -> Self {
-        Self { vault }
+        Self {
+            vault,
+            azure: OnceCell::new(),
+        }
     }
 
     /// Replace the vault (used by `/vault/unlock` API).
@@ -54,23 +64,11 @@ impl BrainFactory {
     }
 
     /// Build a brain adapter from a manifest.
-    pub fn build(&self, manifest: &AgentManifest) -> Result<Arc<dyn BrainAdapter>> {
+    pub async fn build(&self, manifest: &AgentManifest) -> Result<Arc<dyn BrainAdapter>> {
         let provider = &manifest.brain.provider_id;
         let model = manifest.brain.model.clone();
 
-        let secret_name = provider
-            .strip_prefix("vault:")
-            .ok_or_else(|| CoreError::Other(format!("unsupported provider_id: {provider}")))?;
-
-        let vault = self
-            .vault
-            .as_ref()
-            .ok_or_else(|| CoreError::Other("vault is locked; POST /api/v1/vault/unlock".into()))?;
-
-        let api_key = vault
-            .get(secret_name)
-            .map_err(|e| CoreError::Other(format!("vault: {e}")))?
-            .to_string();
+        let api_key = self.resolve_key(provider).await?;
 
         // Layer:  optional_cache( optional_routing( base ) )
         let base: Arc<dyn BrainAdapter> = if manifest.brain.auto_route {
@@ -97,6 +95,36 @@ impl BrainFactory {
         } else {
             Ok(base)
         }
+    }
+
+    /// Resolve a `provider_id` to a plaintext API key from the appropriate
+    /// secret backend.
+    async fn resolve_key(&self, provider: &str) -> Result<String> {
+        if AzureSecretRef::matches(provider) {
+            let kv = self
+                .azure
+                .get_or_try_init(AzureKeyVault::from_env)
+                .map_err(|e| CoreError::Other(format!("azure key vault: {e}")))?;
+            let secret = kv
+                .resolve_reference(provider)
+                .await
+                .map_err(|e| CoreError::Other(format!("azure key vault: {e}")))?;
+            return Ok(secret.to_string());
+        }
+
+        let secret_name = provider
+            .strip_prefix("vault:")
+            .ok_or_else(|| CoreError::Other(format!("unsupported provider_id: {provider}")))?;
+
+        let vault = self
+            .vault
+            .as_ref()
+            .ok_or_else(|| CoreError::Other("vault is locked; POST /api/v1/vault/unlock".into()))?;
+
+        Ok(vault
+            .get(secret_name)
+            .map_err(|e| CoreError::Other(format!("vault: {e}")))?
+            .to_string())
     }
 }
 

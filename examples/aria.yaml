@@ -3,6 +3,11 @@
 #
 # `provider_id` points at a secret stored in your sealed BYOK vault
 # (see docs/quickstart.md). Swap the model for whatever you have access to.
+#
+# To pull the key from Azure Key Vault instead of the local vault, use:
+#   provider_id: azure-kv://<your-vault-name>/byok-anthropic
+# and set AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET (or
+# AZURE_KEYVAULT_TOKEN). See docs/configuration.md → BYOK secret backends.
 spec_version: coop/v1
 name: aria
 brain:

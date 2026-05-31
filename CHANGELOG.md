@@ -56,8 +56,20 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
     returns **HTTP 403** on violation; the WSS `/shell/send` path and
     internal task dispatch return `PermissionDenied`.
 
-### Changed
+### Added
 
+- **Azure Key Vault BYOK backend.** A Hen's `brain.provider_id` may now use the
+  `azure-kv://<vault>/<secret>[/<version>]` scheme to fetch its model API key
+  from Azure Key Vault at run time instead of the local sealed vault.
+  Credentials come from the environment (Azure `EnvironmentCredential` model):
+  a static `AZURE_KEYVAULT_TOKEN`, or an `AZURE_TENANT_ID` /`AZURE_CLIENT_ID` /
+  `AZURE_CLIENT_SECRET` service principal (tokens cached until just before
+  expiry). Sovereign clouds via `AZURE_KEYVAULT_DNS_SUFFIX` /
+  `AZURE_AUTHORITY_HOST`. The fetched secret is held in `Zeroizing` memory and
+  never written to disk. New module `coopd_vault::azure`. See
+  [docs/configuration.md](./docs/configuration.md#azure-key-vault).
+
+### Changed
 - **Open-core split.** `coopd-market` has been moved out of the OSS workspace
   into a separate proprietary repo (`coop-market`). The OSS daemon now ships
   with 7 crates instead of 8; the cross-Coop market layer is enabled via the

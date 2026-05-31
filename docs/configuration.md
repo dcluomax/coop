@@ -37,6 +37,46 @@ always exempt.
 
 See [discord.md](./discord.md).
 
+## BYOK secret backends
+
+A Hen's `brain.provider_id` selects **where its model API key comes from**:
+
+| `provider_id` | Backend | Notes |
+|---------------|---------|-------|
+| `vault:<secret>` | Local sealed vault | Default. Sealed XChaCha20-Poly1305 file, unlocked via `COOP_PASSPHRASE` / `/api/v1/vault/unlock`. |
+| `azure-kv://<vault>/<secret>` | **Azure Key Vault** | Fetched at run time over HTTPS; never written to disk. Optional `/<version>` suffix pins a secret version. |
+
+### Azure Key Vault
+
+When a `provider_id` uses the `azure-kv://` scheme, `coopd` fetches the secret
+from Azure Key Vault using credentials from the environment (the standard Azure
+`EnvironmentCredential` model). Credentials are resolved in this order:
+
+| Variable(s) | Auth mode |
+|-------------|-----------|
+| `AZURE_KEYVAULT_TOKEN` | A pre-acquired AAD bearer token (managed identity, `az account get-access-token --resource https://vault.azure.net`, …). Not auto-refreshed. |
+| `AZURE_TENANT_ID` + `AZURE_CLIENT_ID` + `AZURE_CLIENT_SECRET` | Service principal (OAuth2 client-credentials). Tokens are acquired and cached automatically until just before expiry. |
+
+Optional overrides for sovereign / national clouds:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AZURE_KEYVAULT_DNS_SUFFIX` | `vault.azure.net` | Key Vault hostname suffix (e.g. `vault.azure.cn`, `vault.usgovcloudapi.net`). |
+| `AZURE_AUTHORITY_HOST` | `https://login.microsoftonline.com` | AAD authority host. |
+
+The service principal (or token) needs the **Get** secret permission on the
+target vault (`Key Vault Secrets User` role under RBAC, or a `get` secrets
+access policy). Example manifest:
+
+```yaml
+brain:
+  provider_id: azure-kv://my-coop-kv/byok-anthropic
+  model: claude-sonnet-4-5-20250929
+```
+
+Secrets fetched from Azure Key Vault are held in memory only (zeroized on drop)
+and never persisted to the local vault file.
+
 ## CLI
 
 The `coop` CLI talks to `COOP_API` (default `http://127.0.0.1:9700`). Set it to
