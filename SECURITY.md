@@ -41,6 +41,7 @@ These controls land in the current source tree:
 | C5  | **Per-instance `bash` sandbox.** Shell commands are confined to the hen's own workdir with an OS-native sandbox — macOS Seatbelt (`sandbox-exec`) and Linux Bubblewrap (`bwrap`): writes outside the workdir are denied and sibling hens' workdirs are unreadable, so one chicken cannot read or tamper with another. A cached capability probe falls back to env-scrub + `cwd` confinement (with a one-time warning) where the OS sandbox is unavailable; `COOP_SANDBOX=0` disables it. Windows strong confinement requires WSL/containers (limitation). |
 | H7  | **`bash` environment scrub.** The shell runs with `env_clear()` and a minimal allowlist (`PATH`, `HOME`/`TMPDIR`=workdir, `COOP_HEN_*`, locale), so host secrets (vault passphrase, API keys, bearer tokens) and one hen's env never leak into another's shell. |
 | H8  | **Unique-per-instance workdir.** Workdirs key on `HenId::workdir_key()` (`<coop>__<name>`), so a leased-in `bob.coop/aria` cannot collide with a local `alice.coop/aria`. |
+| C6  | **Per-hen network egress policy.** A hen manifest's `network:` block (`off` / `allowlist` / `open`) restricts where the hen may reach. Enforcement is twofold: (1) the in-process `http` tool applies an L7 host+port allowlist on top of the existing SSRF guard (C2); (2) the `bash`/tmux OS sandbox denies **all direct socket egress** for `off`/`allowlist` hens — Linux via an empty network namespace (`bwrap --unshare-net`: raw sockets, `curl --noproxy`, direct-IP connects all fail with `ENETUNREACH`), macOS via Seatbelt `(deny network*)`. Under `allowlist`, host-scoped egress is delivered **only** through the `http` tool in v1 (a forced-egress proxy giving *bash* allow-listed egress on Linux is the documented follow-up). **Fail-closed:** a hen requesting a policy stricter than `open` on a host that cannot enforce it (no user namespaces / Seatbelt, or `COOP_SANDBOX=0`), or a tmux CLI agent (`agent_kind != anthropic`, an unconfined egress surface in v1), **refuses to hatch** rather than silently running open. See [`docs/net-isolation.md`](./docs/net-isolation.md). |
 | H6  | WebSocket frames capped (`/watch`: 64 KiB; `/shell`: 256 KiB).                |
 | M6  | Discord connector default-denies; only IDs in `COOP_DISCORD_ALLOWED_USERS` (or `allowed_user_ids` JSON field) can dispatch jobs. |
 | L1  | Farm UI's xterm.js + addon load with SRI (`integrity=sha384-…`).              |
@@ -55,6 +56,13 @@ These controls land in the current source tree:
 - Anthropic error bodies echoed to `/watch` subscribers (M2).
 - GitHub Actions are pinned by mutable tag (not commit SHA); release
   artifacts are unsigned. Sigstore signing is on the v0.2 roadmap (L2).
+- **Per-hen network (C6) v1 scope:** under `allowlist`, `bash`/tmux get **no
+  direct** egress; allow-listed egress flows only through the in-process `http`
+  tool. A Linux forced-egress proxy that gives *bash* allow-listed egress, SNI
+  re-verification, and sentinel-token secret injection are documented
+  follow-ups (see `docs/net-isolation.md`). tmux CLI agents are not yet wrapped
+  in the per-hen sandbox, so strict-policy hens with `agent_kind != anthropic`
+  fail closed (refuse to hatch).
 
 ## Disclosure timeline
 

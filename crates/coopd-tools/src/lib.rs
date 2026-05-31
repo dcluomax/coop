@@ -105,6 +105,7 @@ pub(crate) fn test_ctx(workdir: std::path::PathBuf) -> coopd_core::ToolCtx {
         session_id: "test".into(),
         lease_id: None,
         workdir,
+        net_policy: coopd_core::ResolvedNetPolicy::default(),
         deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
     }
 }

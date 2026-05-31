@@ -76,6 +76,8 @@ pub struct ToolCtx {
     pub lease_id: Option<String>,
     /// Working directory the tool should operate within.
     pub workdir: PathBuf,
+    /// Compiled per-hen network egress policy. Defaults to `open`.
+    pub net_policy: crate::net::ResolvedNetPolicy,
     /// Deadline (panic-safe).
     pub deadline: Instant,
 }

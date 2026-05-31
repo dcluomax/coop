@@ -22,6 +22,7 @@
 use std::path::Path;
 use std::sync::Once;
 
+use coopd_core::ResolvedNetPolicy;
 use tokio::process::Command;
 use tracing::warn;
 
@@ -45,9 +46,14 @@ fn sandbox_enabled() -> bool {
 /// command still runs with `cwd = workdir` and a scrubbed environment, just
 /// without the OS-native filesystem confinement.
 #[must_use]
-pub fn bash_command(workdir: &Path, hen_id: &str, command: &str) -> Command {
+pub fn bash_command(
+    workdir: &Path,
+    hen_id: &str,
+    command: &str,
+    net: &ResolvedNetPolicy,
+) -> Command {
     let mut cmd = if sandbox_enabled() {
-        wrapped_command(workdir, command)
+        wrapped_command(workdir, command, net)
     } else {
         plain_command(command)
     };
@@ -128,7 +134,7 @@ fn warn_degraded_once() {
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "macos")]
-fn wrapped_command(workdir: &Path, command: &str) -> Command {
+fn wrapped_command(workdir: &Path, command: &str, net: &ResolvedNetPolicy) -> Command {
     let Ok(canon) = workdir.canonicalize() else {
         warn_degraded_once();
         return plain_command(command);
@@ -137,7 +143,7 @@ fn wrapped_command(workdir: &Path, command: &str) -> Command {
         warn_degraded_once();
         return plain_command(command);
     }
-    let profile = seatbelt_profile(&canon);
+    let profile = seatbelt_profile(&canon, net.bash_egress_denied());
     let mut cmd = Command::new("/usr/bin/sandbox-exec");
     cmd.arg("-p")
         .arg(profile)
@@ -147,10 +153,12 @@ fn wrapped_command(workdir: &Path, command: &str) -> Command {
     cmd
 }
 
-/// Build a Seatbelt profile confining writes to `wd` (+ `/dev`) and hiding
-/// sibling hen workdirs from reads. Later rules override earlier ones.
+/// Build a Seatbelt profile confining writes to `wd` (+ `/dev`), hiding
+/// sibling hen workdirs from reads, and — when `deny_net` is set — denying
+/// **all** network egress (`off`/`allowlist` policies). Later rules override
+/// earlier ones.
 #[cfg(target_os = "macos")]
-fn seatbelt_profile(wd: &Path) -> String {
+fn seatbelt_profile(wd: &Path, deny_net: bool) -> String {
     let esc = |p: &Path| {
         p.to_string_lossy()
             .replace('\\', "\\\\")
@@ -165,6 +173,13 @@ fn seatbelt_profile(wd: &Path) -> String {
         let root_s = esc(root);
         profile.push_str(&format!("(deny file-read* (subpath \"{root_s}\"))\n"));
         profile.push_str(&format!("(allow file-read* (subpath \"{wd_s}\"))\n"));
+    }
+    if deny_net {
+        // macOS has no per-host network allowlisting and a shared loopback, so
+        // strict policies deny ALL direct socket egress for bash/tmux. Host-
+        // scoped egress is delivered only via the in-process `http` tool. See
+        // docs/net-isolation.md (§4, honesty contract).
+        profile.push_str("(deny network*)\n");
     }
     profile
 }
@@ -187,7 +202,7 @@ fn seatbelt_works() -> bool {
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "linux")]
-fn wrapped_command(workdir: &Path, command: &str) -> Command {
+fn wrapped_command(workdir: &Path, command: &str, net: &ResolvedNetPolicy) -> Command {
     let Ok(canon) = workdir.canonicalize() else {
         warn_degraded_once();
         return plain_command(command);
@@ -203,6 +218,14 @@ fn wrapped_command(workdir: &Path, command: &str) -> Command {
         .args(["--dev", "/dev"])
         .args(["--proc", "/proc"])
         .args(["--tmpfs", "/tmp"]);
+    // Network isolation: strict policies (off/allowlist) get an empty network
+    // namespace, so the hen's bash/tmux has NO route to anywhere — raw sockets,
+    // `curl --noproxy`, direct-IP connects all fail with ENETUNREACH. Under
+    // `allowlist`, host-scoped egress is delivered via the in-process `http`
+    // tool (v1). See docs/net-isolation.md.
+    if net.bash_egress_denied() {
+        cmd.arg("--unshare-net");
+    }
     // Mask sibling hen workdirs with an empty tmpfs, then re-expose our own.
     if let Some(root) = canon.parent() {
         cmd.arg("--tmpfs").arg(root);
@@ -241,15 +264,47 @@ fn bwrap_works() -> bool {
 // ---------------------------------------------------------------------------
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn wrapped_command(_workdir: &Path, command: &str) -> Command {
+fn wrapped_command(_workdir: &Path, command: &str, _net: &ResolvedNetPolicy) -> Command {
     warn_degraded_once();
     plain_command(command)
+}
+
+/// Whether this host can enforce a network policy stricter than `open`
+/// (`off`/`allowlist`) for the `bash`/tmux egress surface. Mirrors
+/// [`isolation_active`]: Linux needs a working `bwrap` (user namespaces for
+/// `--unshare-net`); macOS needs `sandbox-exec` (Seatbelt `(deny network*)`).
+///
+/// The hatch path consults this and **refuses to hatch** a strict-policy hen
+/// when it returns `false`, rather than silently running with open egress.
+#[must_use]
+pub fn net_isolation_available() -> bool {
+    if !sandbox_enabled() {
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        seatbelt_works()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        bwrap_works()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        false
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use coopd_core::{NetAllow, NetPolicy, NetworkSpec};
     use tempfile::tempdir;
+
+    /// Default (open) policy for tests that don't exercise network isolation.
+    fn open_net() -> ResolvedNetPolicy {
+        ResolvedNetPolicy::default()
+    }
 
     #[tokio::test]
     async fn env_is_scrubbed_of_host_state() {
@@ -257,7 +312,7 @@ mod tests {
         // shell must be the workdir, not the operator's real home. This proves
         // host env (which may carry secrets) does not leak into the instance.
         let dir = tempdir().unwrap();
-        let out = bash_command(dir.path(), "alice.coop/aria", "echo $HOME")
+        let out = bash_command(dir.path(), "alice.coop/aria", "echo $HOME", &open_net())
             .output()
             .await
             .unwrap();
@@ -277,10 +332,15 @@ mod tests {
     #[tokio::test]
     async fn hen_env_vars_are_present() {
         let dir = tempdir().unwrap();
-        let out = bash_command(dir.path(), "bob.coop/worker", "echo $COOP_HEN_ID")
-            .output()
-            .await
-            .unwrap();
+        let out = bash_command(
+            dir.path(),
+            "bob.coop/worker",
+            "echo $COOP_HEN_ID",
+            &open_net(),
+        )
+        .output()
+        .await
+        .unwrap();
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(stdout.contains("bob.coop/worker"), "got: {stdout}");
     }
@@ -288,7 +348,7 @@ mod tests {
     #[tokio::test]
     async fn basic_command_runs() {
         let dir = tempdir().unwrap();
-        let out = bash_command(dir.path(), "alice.coop/aria", "echo hello")
+        let out = bash_command(dir.path(), "alice.coop/aria", "echo hello", &open_net())
             .output()
             .await
             .unwrap();
@@ -320,6 +380,7 @@ mod tests {
             &alice,
             "alice.coop/aria",
             &format!("cat '{}'", bob_secret.display()),
+            &open_net(),
         )
         .output()
         .await
@@ -350,6 +411,7 @@ mod tests {
             &wd,
             "alice.coop/aria",
             &format!("echo pwned > '{}'", escape.display()),
+            &open_net(),
         )
         .output()
         .await
@@ -375,15 +437,107 @@ mod tests {
         let wd = root.path().join("alice-coop__aria");
         std::fs::create_dir_all(&wd).unwrap();
 
-        let out = bash_command(&wd, "alice.coop/aria", "echo ok > mine.txt && cat mine.txt")
-            .output()
-            .await
-            .unwrap();
+        let out = bash_command(
+            &wd,
+            "alice.coop/aria",
+            "echo ok > mine.txt && cat mine.txt",
+            &open_net(),
+        )
+        .output()
+        .await
+        .unwrap();
         assert!(out.status.success(), "own-workdir write should succeed");
         assert!(String::from_utf8_lossy(&out.stdout).contains("ok"));
         assert_eq!(
             std::fs::read_to_string(wd.join("mine.txt")).unwrap().trim(),
             "ok"
         );
+    }
+
+    // ---- Per-hen network isolation (adversarial) -----------------------
+    // A hen under `off`/`allowlist` must have NO direct egress from bash:
+    // the OS sandbox (Linux empty netns / macOS Seatbelt deny network*)
+    // makes raw sockets, curl --noproxy, direct-IP connects all fail.
+
+    fn allowlist(host: &str) -> ResolvedNetPolicy {
+        ResolvedNetPolicy::from_spec(Some(&NetworkSpec {
+            policy: NetPolicy::Allowlist,
+            allow: vec![NetAllow {
+                host: host.to_string(),
+                ports: vec![443],
+            }],
+        }))
+    }
+
+    fn off() -> ResolvedNetPolicy {
+        ResolvedNetPolicy::from_spec(Some(&NetworkSpec {
+            policy: NetPolicy::Off,
+            allow: vec![],
+        }))
+    }
+
+    /// A raw TCP `connect()` to a public IP must fail when the hen's policy is
+    /// `off`. Skipped unless the OS network sandbox is enforceable here.
+    #[tokio::test]
+    async fn off_policy_denies_bash_egress() {
+        if !net_isolation_available() {
+            eprintln!("skip: OS network sandbox unavailable on this host");
+            return;
+        }
+        let root = tempdir().unwrap();
+        let wd = root.path().join("alice-coop__aria");
+        std::fs::create_dir_all(&wd).unwrap();
+        // bash has no curl guarantee; use bash's own /dev/tcp pseudo-device,
+        // which performs a real connect(2) via the shell. A blocked netns
+        // returns non-zero ("Network is unreachable").
+        let out = bash_command(
+            &wd,
+            "alice.coop/aria",
+            "exec 3<>/dev/tcp/1.1.1.1/443 && echo REACHED || echo BLOCKED",
+            &off(),
+        )
+        .output()
+        .await
+        .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            !stdout.contains("REACHED"),
+            "ISOLATION BREACH: off-policy hen reached the network: {stdout}"
+        );
+    }
+
+    /// Under `allowlist`, bash still gets NO direct egress (host-scoped egress
+    /// is delivered only via the in-process `http` tool in v1).
+    #[tokio::test]
+    async fn allowlist_policy_denies_direct_bash_egress() {
+        if !net_isolation_available() {
+            eprintln!("skip: OS network sandbox unavailable on this host");
+            return;
+        }
+        let root = tempdir().unwrap();
+        let wd = root.path().join("alice-coop__aria");
+        std::fs::create_dir_all(&wd).unwrap();
+        let out = bash_command(
+            &wd,
+            "alice.coop/aria",
+            "exec 3<>/dev/tcp/1.1.1.1/443 && echo REACHED || echo BLOCKED",
+            &allowlist("api.anthropic.com"),
+        )
+        .output()
+        .await
+        .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            !stdout.contains("REACHED"),
+            "ISOLATION BREACH: allowlist hen got direct bash egress: {stdout}"
+        );
+    }
+
+    /// `open` policy leaves bash egress unchanged (no network args added).
+    #[test]
+    fn open_policy_adds_no_network_restriction() {
+        assert!(!open_net().bash_egress_denied());
+        assert!(off().bash_egress_denied());
+        assert!(allowlist("x.com").bash_egress_denied());
     }
 }

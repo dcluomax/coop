@@ -80,7 +80,8 @@ impl CoopTool for Bash {
         // are isolated from each other and from host secrets.
         let workdir = ctx.workdir.clone();
 
-        let mut cmd = crate::sandbox::bash_command(&workdir, &ctx.agent_id, &inp.command);
+        let mut cmd =
+            crate::sandbox::bash_command(&workdir, &ctx.agent_id, &inp.command, &ctx.net_policy);
 
         let dur = std::time::Duration::from_secs(inp.timeout_s.min(600));
         let result = tokio::time::timeout(dur, cmd.output()).await;

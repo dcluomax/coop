@@ -9,3 +9,16 @@ brain:
   provider_id: vault:byok-anthropic
   model: claude-sonnet-4-5-20250929
 tools: [bash, file_read, file_write, http]
+
+# Per-hen network egress policy (optional; omit for unrestricted `open`).
+#   off       — no egress at all.
+#   allowlist — egress only to the hosts/ports below (default-deny).
+#   open      — unrestricted (the http tool still blocks SSRF).
+# Under `allowlist`, the `http` tool reaches allowed hosts; the `bash`/tmux
+# shell gets NO direct network (Linux empty netns / macOS Seatbelt deny).
+# See docs/net-isolation.md.
+network:
+  policy: allowlist
+  allow:
+    - host: api.anthropic.com
+      ports: [443]
