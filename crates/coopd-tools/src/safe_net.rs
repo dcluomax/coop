@@ -102,9 +102,10 @@ pub async fn validate_url(url: &str) -> Result<()> {
     Ok(())
 }
 
-/// Enforce a per-hen [`ResolvedNetPolicy`] against a URL (L7 host+port
-/// allowlist). This is the in-process counterpart to the OS network sandbox:
-/// it gates the `http` tool, which runs with the daemon's privileges.
+/// Enforce a per-hen [`ResolvedNetPolicy`](coopd_core::ResolvedNetPolicy)
+/// against a URL (L7 host+port allowlist). This is the in-process counterpart
+/// to the OS network sandbox: it gates the `http` tool, which runs with the
+/// daemon's privileges.
 ///
 /// - `open` → permitted (the SSRF guard in [`validate_url`] still applies).
 /// - `off` → always refused.
