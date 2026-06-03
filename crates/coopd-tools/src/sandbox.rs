@@ -26,8 +26,25 @@ use coopd_core::ResolvedNetPolicy;
 use tokio::process::Command;
 use tracing::warn;
 
-/// Minimal `PATH` used inside the sandbox when the host `PATH` is unset.
+/// Fixed `PATH` used inside every sandboxed shell.
+///
+/// We deliberately do **not** inherit the operator's host `PATH`: it can contain
+/// user-writable directories (e.g. `~/bin`, project-local `node_modules/.bin`)
+/// that a hostile hen could exploit to shadow real tools (GAP-5). Locking to a
+/// fixed set of system directories closes that vector while still resolving the
+/// standard coreutils every tool relies on.
 const FALLBACK_PATH: &str = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+
+/// CPU-time cap (seconds) applied to each sandboxed shell via `ulimit -t`.
+/// A backstop above the per-call wall-clock timeout that blunts CPU-spinning
+/// commands (GAP-7). Fork-bomb (`RLIMIT_NPROC`) limiting is intentionally not
+/// set here — it is per-real-UID on Linux and would starve the shared daemon;
+/// that needs cgroups and is tracked for a later phase.
+const RLIMIT_CPU_SECS: u64 = 300;
+
+/// Max file-size cap (1024-byte blocks) applied via `ulimit -f` — ~4 GiB.
+/// Prevents a single command from filling the disk (GAP-7).
+const RLIMIT_FSIZE_BLOCKS: u64 = 4 * 1024 * 1024;
 
 /// Whether sandboxing is enabled. Default on; `COOP_SANDBOX=0` (or `false`)
 /// turns it off.
@@ -52,14 +69,27 @@ pub fn bash_command(
     command: &str,
     net: &ResolvedNetPolicy,
 ) -> Command {
+    // Prepend resource limits so they apply on every path (OS-sandboxed or the
+    // degraded fallback) and to whatever the model asked to run.
+    let hardened = harden_command(command);
     let mut cmd = if sandbox_enabled() {
-        wrapped_command(workdir, command, net)
+        wrapped_command(workdir, &hardened, net)
     } else {
-        plain_command(command)
+        plain_command(&hardened)
     };
     scrub_env(&mut cmd, workdir, hen_id);
     cmd.current_dir(workdir);
     cmd
+}
+
+/// Prefix `command` with `ulimit` resource caps. Failures (e.g. a non-POSIX
+/// shell, or an already-lower limit) are silenced so they can never abort the
+/// user's command; the caps only ever lower limits, which is always permitted
+/// for an unprivileged process.
+fn harden_command(command: &str) -> String {
+    format!(
+        "ulimit -t {RLIMIT_CPU_SECS} 2>/dev/null; ulimit -f {RLIMIT_FSIZE_BLOCKS} 2>/dev/null; {command}"
+    )
 }
 
 /// Whether **OS-native filesystem confinement** (not just the env scrub) is in
@@ -101,8 +131,9 @@ fn plain_command(command: &str) -> Command {
 /// one hen's variables from bleeding into another hen's shell.
 fn scrub_env(cmd: &mut Command, workdir: &Path, hen_id: &str) {
     cmd.env_clear();
-    let path = std::env::var("PATH").unwrap_or_else(|_| FALLBACK_PATH.to_string());
-    cmd.env("PATH", path);
+    // Lock PATH to a fixed system value (see FALLBACK_PATH) rather than
+    // inheriting the host's, which may contain user-writable directories.
+    cmd.env("PATH", FALLBACK_PATH);
     cmd.env("HOME", workdir);
     cmd.env("TMPDIR", workdir);
     cmd.env("TERM", "dumb");
@@ -213,6 +244,10 @@ fn wrapped_command(workdir: &Path, command: &str, net: &ResolvedNetPolicy) -> Co
     }
     let mut cmd = Command::new("bwrap");
     cmd.arg("--die-with-parent")
+        // Run in a fresh session with no controlling terminal so a hostile
+        // command cannot inject keystrokes into the operator's tty via the
+        // TIOCSTI ioctl (CVE-2017-5226).
+        .arg("--new-session")
         .arg("--unshare-pid")
         .args(["--ro-bind", "/", "/"])
         .args(["--dev", "/dev"])
@@ -354,6 +389,46 @@ mod tests {
             .unwrap();
         assert!(out.status.success());
         assert!(String::from_utf8_lossy(&out.stdout).contains("hello"));
+    }
+
+    #[tokio::test]
+    async fn path_is_locked_to_system_value() {
+        // The host PATH must not leak in: a hostile hen could otherwise rely on
+        // a user-writable dir on the operator's PATH to shadow real binaries.
+        let dir = tempdir().unwrap();
+        let out = bash_command(dir.path(), "alice.coop/aria", "echo \"$PATH\"", &open_net())
+            .output()
+            .await
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(stdout.trim(), FALLBACK_PATH, "PATH not locked: {stdout}");
+    }
+
+    #[tokio::test]
+    async fn hardening_preserves_exit_code() {
+        // The ulimit prologue must be transparent to the command's exit status.
+        let dir = tempdir().unwrap();
+        let out = bash_command(dir.path(), "alice.coop/aria", "exit 42", &open_net())
+            .output()
+            .await
+            .unwrap();
+        assert_eq!(out.status.code(), Some(42), "prologue altered exit code");
+    }
+
+    #[tokio::test]
+    async fn cpu_rlimit_is_applied() {
+        // ulimit -t should report our cap (or a lower host-imposed one), never
+        // "unlimited".
+        let dir = tempdir().unwrap();
+        let out = bash_command(dir.path(), "alice.coop/aria", "ulimit -t", &open_net())
+            .output()
+            .await
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let reported = stdout.trim();
+        assert_ne!(reported, "unlimited", "CPU rlimit not applied");
+        let secs: u64 = reported.parse().expect("numeric ulimit -t");
+        assert!(secs <= RLIMIT_CPU_SECS, "CPU rlimit too high: {secs}");
     }
 
     // ---- End-to-end OS-sandbox isolation -------------------------------
