@@ -35,7 +35,7 @@ One static binary: no Python, no Docker required.
 |---|---|
 | 🏡 **Self-hosted** | Your hardware, your agents, your data. No mandatory cloud. |
 | 🔐 **BYOK vault** | Sealed `xchacha20poly1305` vault for your model keys, or pull them from **Azure Key Vault**. Locked at rest. |
-| 🤖 **Real autonomy** | Hens get a sandboxed PTY shell, a tool ABI, and an Anthropic brain. |
+| 🤖 **Real autonomy** | Hens get a sandboxed PTY shell, a tool ABI, and a pluggable brain — **Anthropic**, **OpenAI**, or any OpenAI-compatible server (Ollama, vLLM, OpenRouter…). |
 | 🧱 **Per-hen isolation** | Each hen runs in its own OS sandbox (macOS Seatbelt / Linux Bubblewrap) — confined to its workdir, scrubbed env, siblings unreadable. |
 | 🌐 **Network egress policy** | Per-hen `network:` block — `off` / `allowlist` / `open`. Fail-closed: a hen that can't enforce its policy refuses to hatch. |
 | 🖥️ **Live shell** | Click any hen in the Farm UI to drop into a real terminal in its workdir. |
@@ -88,8 +88,8 @@ Coop is organised into four conceptual layers — **this repo is L1** (the agent
 
 **Workspace (7 OSS crates):** `coopd` (daemon — HTTP/WS API, orchestrator) ·
 `coopd-core` (types/traits) · `coopd-storage` (redb) · `coopd-vault` (sealed
-BYOK) · `coopd-tools` (`bash`/`file_*`/`http`) · `coopd-brain` (Anthropic
-adapter) · `coop-cli` (the `coop` binary).
+BYOK) · `coopd-tools` (`bash`/`file_*`/`http`) · `coopd-brain` (Anthropic +
+OpenAI / OpenAI-compatible adapters) · `coop-cli` (the `coop` binary).
 
 ## 🖥️ Farm UI
 

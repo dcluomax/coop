@@ -1,7 +1,9 @@
 //! Brain factory: builds a `BrainAdapter` for a given Hen manifest.
 //!
-//! Resolves `manifest.brain.provider_id` to an Anthropic API key. Two schemes
-//! are supported:
+//! `manifest.brain.provider` selects the adapter (`anthropic`, `openai`, or
+//! `openai-compat`); `manifest.brain.provider_id` selects where the API key is
+//! read from. Two key schemes are supported (plus the `none` sentinel for
+//! keyless local servers):
 //!
 //! * `vault:<secret-name>` — read from the unlocked local sealed vault.
 //! * `azure-kv://<vault>/<secret>[/<version>]` — fetch from Azure Key Vault
@@ -9,7 +11,7 @@
 
 use std::sync::Arc;
 
-use coopd_brain::{Anthropic, CachingBrain, RoutingBrain, router::models};
+use coopd_brain::{Anthropic, CachingBrain, OpenAi, RoutingBrain, router::models};
 use coopd_core::{AgentManifest, BrainAdapter, CoreError, Result};
 use coopd_vault::{AzureKeyVault, AzureSecretRef, Vault};
 use once_cell::sync::OnceCell;
@@ -71,16 +73,27 @@ impl BrainFactory {
         let api_key = self.resolve_key(provider).await?;
 
         // Layer:  optional_cache( optional_routing( base ) )
-        let base: Arc<dyn BrainAdapter> = if manifest.brain.auto_route {
-            let haiku: Arc<dyn BrainAdapter> =
-                Arc::new(Anthropic::new(api_key.clone(), models::HAIKU.to_string()));
-            let sonnet: Arc<dyn BrainAdapter> =
-                Arc::new(Anthropic::new(api_key.clone(), models::SONNET.to_string()));
-            let opus: Arc<dyn BrainAdapter> =
-                Arc::new(Anthropic::new(api_key, models::OPUS.to_string()));
-            Arc::new(RoutingBrain::new(haiku, sonnet, opus))
-        } else {
-            Arc::new(Anthropic::new(api_key, model.clone()))
+        let base: Arc<dyn BrainAdapter> = match manifest.brain.provider.as_str() {
+            "anthropic" if manifest.brain.auto_route => {
+                let haiku: Arc<dyn BrainAdapter> =
+                    Arc::new(Anthropic::new(api_key.clone(), models::HAIKU.to_string()));
+                let sonnet: Arc<dyn BrainAdapter> =
+                    Arc::new(Anthropic::new(api_key.clone(), models::SONNET.to_string()));
+                let opus: Arc<dyn BrainAdapter> =
+                    Arc::new(Anthropic::new(api_key, models::OPUS.to_string()));
+                Arc::new(RoutingBrain::new(haiku, sonnet, opus))
+            }
+            "anthropic" => Arc::new(Anthropic::new(api_key, model.clone())),
+            "openai" => Arc::new(OpenAi::new(api_key, model.clone())),
+            "openai-compat" => {
+                let base_url = manifest.brain.base_url.clone().ok_or_else(|| {
+                    CoreError::Other("provider openai-compat requires brain.base_url".into())
+                })?;
+                Arc::new(OpenAi::new(api_key, model.clone()).with_base_url(base_url))
+            }
+            other => {
+                return Err(CoreError::Other(format!("unknown brain.provider: {other}")));
+            }
         };
 
         if manifest.brain.cache {
@@ -98,8 +111,12 @@ impl BrainFactory {
     }
 
     /// Resolve a `provider_id` to a plaintext API key from the appropriate
-    /// secret backend.
+    /// secret backend. The sentinel `none` yields an empty key for keyless
+    /// OpenAI-compatible local servers.
     async fn resolve_key(&self, provider: &str) -> Result<String> {
+        if provider == "none" {
+            return Ok(String::new());
+        }
         if AzureSecretRef::matches(provider) {
             let kv = self
                 .azure

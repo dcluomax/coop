@@ -1,0 +1,30 @@
+# Local OpenAI-compatible Hen (Ollama). Create it with:
+#   coop hen create examples/local-ollama.yaml
+#
+# `provider: openai-compat` speaks the OpenAI Chat Completions API against any
+# compatible server (Ollama, vLLM, LM Studio, OpenRouter, Groq, …). It requires
+# a `base_url`. A keyless local server uses the `provider_id: none` sentinel,
+# which skips the BYOK vault lookup entirely.
+#
+# For a hosted provider that needs a key, set instead:
+#   provider_id: vault:byok-openrouter   # key from the sealed vault
+#   provider: openai-compat
+#   base_url: https://openrouter.ai/api/v1
+# See docs/configuration.md → Brain providers.
+spec_version: coop/v1
+name: lobo
+brain:
+  provider_id: none
+  provider: openai-compat
+  base_url: http://localhost:11434/v1
+  model: llama3.1
+tools: [bash, file_read, file_write]
+
+# Ollama listens on loopback, so allow egress to localhost:11434.
+# (The `http` tool's SSRF guard still applies to the `http` tool itself;
+# the brain adapter reaches the configured base_url directly.)
+network:
+  policy: allowlist
+  allow:
+    - host: localhost
+      ports: [11434]

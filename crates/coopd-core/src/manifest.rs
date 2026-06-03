@@ -140,8 +140,17 @@ impl AgentKind {
 /// Brain configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrainSpec {
-    /// Provider identifier (e.g. `vault:byok-anthropic-01`).
+    /// Provider identifier — where the API key is read from (e.g.
+    /// `vault:byok-anthropic-01` or `azure-kv://vault/secret`).
     pub provider_id: String,
+    /// Brain provider kind: `anthropic` (default), `openai`, or
+    /// `openai-compat` (any OpenAI-compatible endpoint — requires `base_url`).
+    #[serde(default = "default_provider")]
+    pub provider: String,
+    /// Base URL override for the `openai-compat` provider (e.g.
+    /// `http://localhost:11434/v1` for Ollama). Ignored by other providers.
+    #[serde(default)]
+    pub base_url: Option<String>,
     /// Model name (e.g. `claude-sonnet-4.6`).
     pub model: String,
     /// Required capabilities.
@@ -157,6 +166,12 @@ pub struct BrainSpec {
     /// When `true`, identical requests are served from an in-process LRU.
     #[serde(default)]
     pub cache: bool,
+}
+
+/// Default brain provider when a manifest omits `brain.provider` — the built-in
+/// Anthropic adapter, preserving v0.1 manifests unchanged.
+fn default_provider() -> String {
+    "anthropic".to_string()
 }
 
 /// Brain capability requirements.
@@ -362,6 +377,8 @@ impl AgentManifest {
             agent_kind: AgentKind::default(),
             brain: BrainSpec {
                 provider_id: "vault:default".to_string(),
+                provider: default_provider(),
+                base_url: None,
                 model: "claude-sonnet-4.6".to_string(),
                 capabilities_required: None,
                 fallback_provider_ids: vec![],
@@ -419,6 +436,34 @@ impl AgentManifest {
             }
             if self.brain.model.is_empty() {
                 return Err(CoreError::InvalidManifest("brain.model empty".into()));
+            }
+            match self.brain.provider.as_str() {
+                "anthropic" | "openai" => {}
+                "openai-compat" => {
+                    let url = self.brain.base_url.as_deref().unwrap_or_default();
+                    if url.is_empty() {
+                        return Err(CoreError::InvalidManifest(
+                            "brain.base_url is required for provider openai-compat".into(),
+                        ));
+                    }
+                    if !(url.starts_with("http://") || url.starts_with("https://")) {
+                        return Err(CoreError::InvalidManifest(
+                            "brain.base_url must be an http(s) URL".into(),
+                        ));
+                    }
+                    // Block the well-known cloud-metadata endpoint to blunt the
+                    // obvious SSRF pivot via an operator-supplied base_url.
+                    if url.contains("169.254.169.254") {
+                        return Err(CoreError::InvalidManifest(
+                            "brain.base_url must not target the cloud metadata endpoint".into(),
+                        ));
+                    }
+                }
+                other => {
+                    return Err(CoreError::InvalidManifest(format!(
+                        "unknown brain.provider: {other}"
+                    )));
+                }
             }
         }
         // Leasing safety: if this hen is offered for lease and the owner
@@ -485,6 +530,87 @@ tools: [bash, file_read]
         assert_eq!(m.tools.len(), 2);
         // No network block => None => resolves to open (backward compatible).
         assert!(m.network.is_none());
+        // Omitted provider defaults to anthropic (v0.1 manifests unchanged).
+        assert_eq!(m.brain.provider, "anthropic");
+        assert!(m.brain.base_url.is_none());
+    }
+
+    #[test]
+    fn openai_provider_parses() {
+        let yaml = r#"
+spec_version: coop/v1
+name: gpthen
+brain:
+  provider_id: vault:byok-openai
+  provider: openai
+  model: gpt-4o-mini
+tools: [bash]
+"#;
+        let m = AgentManifest::parse_yaml(yaml).unwrap();
+        assert_eq!(m.brain.provider, "openai");
+    }
+
+    #[test]
+    fn openai_compat_requires_base_url() {
+        let yaml = r#"
+spec_version: coop/v1
+name: localhen
+brain:
+  provider_id: none
+  provider: openai-compat
+  model: llama3
+tools: [bash]
+"#;
+        // Missing base_url must be rejected at validation time.
+        assert!(AgentManifest::parse_yaml(yaml).is_err());
+    }
+
+    #[test]
+    fn openai_compat_with_base_url_is_valid() {
+        let yaml = r#"
+spec_version: coop/v1
+name: localhen
+brain:
+  provider_id: none
+  provider: openai-compat
+  base_url: http://localhost:11434/v1
+  model: llama3
+tools: [bash]
+"#;
+        let m = AgentManifest::parse_yaml(yaml).unwrap();
+        assert_eq!(
+            m.brain.base_url.as_deref(),
+            Some("http://localhost:11434/v1")
+        );
+    }
+
+    #[test]
+    fn unknown_provider_is_rejected() {
+        let yaml = r#"
+spec_version: coop/v1
+name: badhen
+brain:
+  provider_id: vault:x
+  provider: cohere
+  model: m
+tools: [bash]
+"#;
+        assert!(AgentManifest::parse_yaml(yaml).is_err());
+    }
+
+    #[test]
+    fn base_url_metadata_endpoint_is_blocked() {
+        let yaml = r#"
+spec_version: coop/v1
+name: ssrfhen
+brain:
+  provider_id: none
+  provider: openai-compat
+  base_url: http://169.254.169.254/v1
+  model: m
+tools: [bash]
+"#;
+        assert!(AgentManifest::parse_yaml(yaml).is_err());
     }
 
     #[test]
