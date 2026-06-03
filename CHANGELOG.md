@@ -99,6 +99,19 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
   `armv7-unknown-linux-gnueabihf` (via `cross`) targets on every push/PR, so
   ARM breakage is caught before a release tag instead of at release time.
 
+- **Streaming brains.** Both the Anthropic and OpenAI adapters now implement
+  `BrainAdapter::stream`, decoding the provider SSE streams into `ReasonChunk`
+  text deltas plus a final assembled response (tool calls are reassembled from
+  the streamed `tool_use`/`tool_calls` fragments). Shared SSE framing lives in
+  `coopd_brain::sse`.
+
+- **Fallback brains.** `brain.fallbacks` (an ordered list of full brain specs)
+  lets a Hen fail over from a primary provider to one or more backups — e.g.
+  Anthropic primary with a local OpenAI-compatible model as backup. On a failed
+  call the new `coopd_brain::FallbackBrain` decorator transparently retries the
+  next adapter; the first success wins. See
+  [docs/configuration.md](./docs/configuration.md#fallback-brains).
+
 ### Changed
 - **Release toolchain.** `aarch64-unknown-linux-gnu` is now built natively on
   GitHub's hosted `ubuntu-24.04-arm` runner instead of QEMU/`cross` — faster and

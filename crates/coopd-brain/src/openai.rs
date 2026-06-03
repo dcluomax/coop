@@ -11,6 +11,7 @@ use coopd_core::{
     BrainAdapter, BrainCaps, CoreError, ReasonRequest, ReasonResponse, Result, Tier,
     brain::{ContentBlock, Cost, CostEstimate, MessageContent, ReasonChunk, Usage},
 };
+use futures::StreamExt;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -92,6 +93,10 @@ struct OpenAiRequest<'a> {
     max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     stop: Vec<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<Value>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -140,6 +145,154 @@ struct OpenAiFunction {
     name: String,
     #[serde(default)]
     arguments: String,
+}
+
+// ---- Streaming (SSE) types -------------------------------------------------
+
+enum OpenAiStreamState {
+    Active {
+        stream: BoxStream<'static, Result<String>>,
+        acc: OpenAiStreamAcc,
+    },
+    Done,
+}
+
+#[derive(Deserialize, Debug)]
+struct OpenAiStreamChunk {
+    #[serde(default)]
+    choices: Vec<OpenAiStreamChoice>,
+    #[serde(default)]
+    usage: Option<OpenAiUsage>,
+}
+
+#[derive(Deserialize, Debug)]
+struct OpenAiStreamChoice {
+    #[serde(default)]
+    delta: OpenAiStreamDelta,
+    #[serde(default)]
+    finish_reason: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Default)]
+struct OpenAiStreamDelta {
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    tool_calls: Vec<OpenAiStreamToolCall>,
+}
+
+#[derive(Deserialize, Debug)]
+struct OpenAiStreamToolCall {
+    #[serde(default)]
+    index: usize,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: OpenAiStreamFunc,
+}
+
+#[derive(Deserialize, Debug, Default)]
+struct OpenAiStreamFunc {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
+}
+
+/// Accumulates streamed deltas (text, incremental `tool_calls`, finish reason,
+/// usage) into a final [`ReasonResponse`]. OpenAI streams tool calls as a
+/// sequence of fragments keyed by `index`; `id`/`name` arrive once and
+/// `arguments` is concatenated across frames.
+#[derive(Default)]
+struct OpenAiStreamAcc {
+    started: Option<std::time::Instant>,
+    text: String,
+    /// Per-`index` accumulator: (id, name, arguments-so-far).
+    tool_calls: Vec<(String, String, String)>,
+    finish_reason: Option<String>,
+    usage: OpenAiUsage,
+}
+
+impl OpenAiStreamAcc {
+    /// Fold one streamed chunk into the accumulator. Returns any newly-arrived
+    /// text delta so the caller can surface it as a [`ReasonChunk::Text`].
+    fn ingest(&mut self, chunk: OpenAiStreamChunk) -> Option<String> {
+        if self.started.is_none() {
+            self.started = Some(std::time::Instant::now());
+        }
+        if let Some(u) = chunk.usage {
+            self.usage = u;
+        }
+        let mut new_text: Option<String> = None;
+        for choice in chunk.choices {
+            if let Some(fr) = choice.finish_reason {
+                self.finish_reason = Some(fr);
+            }
+            if let Some(c) = choice.delta.content
+                && !c.is_empty()
+            {
+                self.text.push_str(&c);
+                new_text = Some(match new_text.take() {
+                    Some(mut acc) => {
+                        acc.push_str(&c);
+                        acc
+                    }
+                    None => c,
+                });
+            }
+            for tc in choice.delta.tool_calls {
+                if tc.index >= self.tool_calls.len() {
+                    self.tool_calls
+                        .resize(tc.index + 1, (String::new(), String::new(), String::new()));
+                }
+                let slot = &mut self.tool_calls[tc.index];
+                if let Some(id) = tc.id
+                    && !id.is_empty()
+                {
+                    slot.0 = id;
+                }
+                if let Some(name) = tc.function.name
+                    && !name.is_empty()
+                {
+                    slot.1 = name;
+                }
+                if let Some(args) = tc.function.arguments {
+                    slot.2.push_str(&args);
+                }
+            }
+        }
+        new_text
+    }
+
+    /// Assemble the final response from everything accumulated so far.
+    fn finish(self) -> ReasonResponse {
+        let mut content: Vec<ContentBlock> = Vec::new();
+        if !self.text.is_empty() {
+            content.push(ContentBlock::Text { text: self.text });
+        }
+        for (id, name, args) in self.tool_calls {
+            if name.is_empty() {
+                continue;
+            }
+            let input: Value = if args.trim().is_empty() {
+                json!({})
+            } else {
+                serde_json::from_str(&args).unwrap_or_else(|_| Value::String(args.clone()))
+            };
+            content.push(ContentBlock::ToolCall { id, name, input });
+        }
+        ReasonResponse {
+            content,
+            usage: Usage {
+                input_tokens: self.usage.prompt_tokens,
+                output_tokens: self.usage.completion_tokens,
+                cache_tokens: 0,
+            },
+            cost: Cost::default(),
+            finish_reason: normalize_finish_reason(self.finish_reason.as_deref()),
+            latency_ms: self.started.map_or(0, |s| s.elapsed().as_millis() as u32),
+        }
+    }
 }
 
 #[async_trait]
@@ -240,8 +393,90 @@ impl BrainAdapter for OpenAi {
         })
     }
 
-    async fn stream(&self, _req: ReasonRequest) -> Result<BoxStream<'static, Result<ReasonChunk>>> {
-        Err(CoreError::Other("streaming not implemented in v0.1".into()))
+    async fn stream(&self, req: ReasonRequest) -> Result<BoxStream<'static, Result<ReasonChunk>>> {
+        let body = build_request_inner(&self.model, &req, true);
+        debug!(provider = self.provider, model = %self.model, "openai stream request");
+
+        let mut rb = self
+            .client
+            .post(format!("{}/chat/completions", self.base_url))
+            .header("content-type", "application/json")
+            .header("accept", "text/event-stream");
+        if !self.api_key.is_empty() {
+            rb = rb.header("authorization", format!("Bearer {}", self.api_key.as_str()));
+        }
+        let resp = rb
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| CoreError::Other(format!("{}: {e}", self.provider)))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(CoreError::Other(format!(
+                "{} {status}: {text}",
+                self.provider
+            )));
+        }
+
+        let events = crate::sse::sse_data_stream(resp.bytes_stream());
+        let init = OpenAiStreamState::Active {
+            stream: Box::pin(events),
+            acc: OpenAiStreamAcc::default(),
+        };
+        let out = futures::stream::unfold(init, |state| async move {
+            let OpenAiStreamState::Active {
+                mut stream,
+                mut acc,
+            } = state
+            else {
+                return None;
+            };
+            loop {
+                match stream.next().await {
+                    Some(Ok(data)) => {
+                        if data.trim() == "[DONE]" {
+                            let resp = acc.finish();
+                            return Some((
+                                Ok(ReasonChunk::Final { response: resp }),
+                                OpenAiStreamState::Done,
+                            ));
+                        }
+                        match serde_json::from_str::<OpenAiStreamChunk>(&data) {
+                            Ok(chunk) => {
+                                if let Some(delta) = acc.ingest(chunk)
+                                    && !delta.is_empty()
+                                {
+                                    return Some((
+                                        Ok(ReasonChunk::Text { delta }),
+                                        OpenAiStreamState::Active { stream, acc },
+                                    ));
+                                }
+                            }
+                            // Ignore keepalives / unparseable comments.
+                            Err(_) => continue,
+                        }
+                    }
+                    Some(Err(e)) => {
+                        return Some((
+                            Ok(ReasonChunk::Error {
+                                message: e.to_string(),
+                            }),
+                            OpenAiStreamState::Done,
+                        ));
+                    }
+                    None => {
+                        let resp = acc.finish();
+                        return Some((
+                            Ok(ReasonChunk::Final { response: resp }),
+                            OpenAiStreamState::Done,
+                        ));
+                    }
+                }
+            }
+        });
+        Ok(Box::pin(out))
     }
 
     fn estimate_cost(&self, _req: &ReasonRequest) -> CostEstimate {
@@ -282,6 +517,14 @@ fn normalize_finish_reason(raw: Option<&str>) -> String {
 }
 
 fn build_request<'a>(model: &'a str, req: &'a ReasonRequest) -> OpenAiRequest<'a> {
+    build_request_inner(model, req, false)
+}
+
+fn build_request_inner<'a>(
+    model: &'a str,
+    req: &'a ReasonRequest,
+    stream: bool,
+) -> OpenAiRequest<'a> {
     let mut messages: Vec<Value> = Vec::new();
     if !req.system.is_empty() {
         messages.push(json!({ "role": "system", "content": req.system }));
@@ -314,6 +557,9 @@ fn build_request<'a>(model: &'a str, req: &'a ReasonRequest) -> OpenAiRequest<'a
         temperature: Some(req.temperature),
         max_tokens: Some(req.max_tokens),
         stop: req.stop_seq.clone(),
+        stream,
+        // Ask streaming responses to include a final usage block.
+        stream_options: stream.then(|| json!({ "include_usage": true })),
     }
 }
 
@@ -477,5 +723,54 @@ mod tests {
         let dbg = format!("{a:?}");
         assert!(!dbg.contains("sk-secret-123"), "api key leaked: {dbg}");
         assert!(dbg.contains("redacted"));
+    }
+
+    fn chunk(json: &str) -> OpenAiStreamChunk {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn stream_acc_accumulates_text_and_usage() {
+        let mut acc = OpenAiStreamAcc::default();
+        let d1 = acc.ingest(chunk(
+            r#"{"choices":[{"delta":{"content":"Hel"},"finish_reason":null}]}"#,
+        ));
+        assert_eq!(d1.as_deref(), Some("Hel"));
+        let d2 = acc.ingest(chunk(
+            r#"{"choices":[{"delta":{"content":"lo"},"finish_reason":"stop"}]}"#,
+        ));
+        assert_eq!(d2.as_deref(), Some("lo"));
+        acc.ingest(chunk(
+            r#"{"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":2}}"#,
+        ));
+        let resp = acc.finish();
+        assert_eq!(resp.finish_reason, "end_turn");
+        assert_eq!(resp.usage.input_tokens, 7);
+        assert_eq!(resp.usage.output_tokens, 2);
+        match &resp.content[0] {
+            ContentBlock::Text { text } => assert_eq!(text, "Hello"),
+            other => panic!("expected text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stream_acc_assembles_fragmented_tool_call() {
+        let mut acc = OpenAiStreamAcc::default();
+        acc.ingest(chunk(
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"bash","arguments":"{\"cmd\""}}]}}]}"#,
+        ));
+        acc.ingest(chunk(
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"ls\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+        ));
+        let resp = acc.finish();
+        assert_eq!(resp.finish_reason, "tool_use");
+        match &resp.content[0] {
+            ContentBlock::ToolCall { id, name, input } => {
+                assert_eq!(id, "call_1");
+                assert_eq!(name, "bash");
+                assert_eq!(input["cmd"], "ls");
+            }
+            other => panic!("expected tool call, got {other:?}"),
+        }
     }
 }

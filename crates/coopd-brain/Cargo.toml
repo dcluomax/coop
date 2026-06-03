@@ -21,3 +21,4 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 reqwest = { workspace = true }
 zeroize = { workspace = true }
+bytes = { workspace = true }

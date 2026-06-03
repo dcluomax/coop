@@ -8,6 +8,7 @@ use coopd_core::{
     BrainAdapter, BrainCaps, CoreError, ReasonRequest, ReasonResponse, Result, Tier,
     brain::{ContentBlock, Cost, CostEstimate, Message, MessageContent, ReasonChunk, Usage},
 };
+use futures::StreamExt;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -81,6 +82,8 @@ struct AnthropicRequest<'a> {
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Vec::is_empty", rename = "stop_sequences")]
     stop_seq: Vec<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    stream: bool,
 }
 
 #[derive(Deserialize, Debug)]
@@ -119,6 +122,192 @@ enum AnthropicContent {
         #[serde(default)]
         thinking: String,
     },
+}
+
+// ---- Streaming (SSE) types -------------------------------------------------
+
+enum AnthropicStreamState {
+    Active {
+        stream: BoxStream<'static, Result<String>>,
+        acc: AnthropicStreamAcc,
+    },
+    Done,
+}
+
+#[derive(Deserialize, Debug)]
+struct AnthropicStreamEvent {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    index: Option<usize>,
+    #[serde(default)]
+    message: Option<AnthropicStreamMessage>,
+    #[serde(default)]
+    content_block: Option<AnthropicStreamBlock>,
+    #[serde(default)]
+    delta: Option<AnthropicStreamDelta>,
+    #[serde(default)]
+    usage: Option<AnthropicUsage>,
+    #[serde(default)]
+    error: Option<AnthropicStreamError>,
+}
+
+#[derive(Deserialize, Debug, Default)]
+struct AnthropicStreamMessage {
+    #[serde(default)]
+    usage: AnthropicUsage,
+}
+
+#[derive(Deserialize, Debug)]
+struct AnthropicStreamBlock {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    name: String,
+}
+
+#[derive(Deserialize, Debug, Default)]
+struct AnthropicStreamDelta {
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    partial_json: Option<String>,
+    #[serde(default)]
+    stop_reason: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct AnthropicStreamError {
+    #[serde(default)]
+    message: String,
+}
+
+/// One in-flight content block during streaming.
+enum AnthBlock {
+    Text(String),
+    Tool {
+        id: String,
+        name: String,
+        json: String,
+    },
+}
+
+/// Accumulates Anthropic SSE events (`message_start`, `content_block_*`,
+/// `message_delta`) into a final [`ReasonResponse`]. `tool_use` blocks arrive
+/// as a `content_block_start` then a run of `input_json_delta` fragments whose
+/// `partial_json` is concatenated to form the arguments object.
+#[derive(Default)]
+struct AnthropicStreamAcc {
+    started: Option<std::time::Instant>,
+    blocks: Vec<AnthBlock>,
+    stop_reason: Option<String>,
+    input_tokens: u32,
+    output_tokens: u32,
+    cache_tokens: u32,
+}
+
+impl AnthropicStreamAcc {
+    fn ensure(&mut self, idx: usize) {
+        if idx >= self.blocks.len() {
+            self.blocks
+                .resize_with(idx + 1, || AnthBlock::Text(String::new()));
+        }
+    }
+
+    /// Fold one event into the accumulator; returns a newly-arrived text delta
+    /// (if any) for surfacing as [`ReasonChunk::Text`].
+    fn ingest(&mut self, ev: AnthropicStreamEvent) -> Option<String> {
+        if self.started.is_none() {
+            self.started = Some(std::time::Instant::now());
+        }
+        match ev.kind.as_str() {
+            "message_start" => {
+                if let Some(m) = ev.message {
+                    self.input_tokens = m.usage.input_tokens;
+                    self.cache_tokens = m.usage.cache_read_input_tokens;
+                    if m.usage.output_tokens > 0 {
+                        self.output_tokens = m.usage.output_tokens;
+                    }
+                }
+                None
+            }
+            "content_block_start" => {
+                let idx = ev.index.unwrap_or(self.blocks.len());
+                self.ensure(idx);
+                self.blocks[idx] = match ev.content_block {
+                    Some(cb) if cb.kind == "tool_use" => AnthBlock::Tool {
+                        id: cb.id,
+                        name: cb.name,
+                        json: String::new(),
+                    },
+                    _ => AnthBlock::Text(String::new()),
+                };
+                None
+            }
+            "content_block_delta" => {
+                let idx = ev.index.unwrap_or(0);
+                self.ensure(idx);
+                let d = ev.delta?;
+                if let Some(t) = d.text {
+                    if let AnthBlock::Text(s) = &mut self.blocks[idx] {
+                        s.push_str(&t);
+                    }
+                    return Some(t);
+                }
+                if let Some(pj) = d.partial_json
+                    && let AnthBlock::Tool { json, .. } = &mut self.blocks[idx]
+                {
+                    json.push_str(&pj);
+                }
+                None
+            }
+            "message_delta" => {
+                if let Some(d) = ev.delta
+                    && let Some(sr) = d.stop_reason
+                {
+                    self.stop_reason = Some(sr);
+                }
+                if let Some(u) = ev.usage {
+                    self.output_tokens = u.output_tokens;
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn finish(self) -> ReasonResponse {
+        let mut content: Vec<ContentBlock> = Vec::new();
+        for block in self.blocks {
+            match block {
+                AnthBlock::Text(text) if !text.is_empty() => {
+                    content.push(ContentBlock::Text { text });
+                }
+                AnthBlock::Tool { id, name, json } if !name.is_empty() => {
+                    let input: Value = if json.trim().is_empty() {
+                        json!({})
+                    } else {
+                        serde_json::from_str(&json).unwrap_or_else(|_| Value::String(json.clone()))
+                    };
+                    content.push(ContentBlock::ToolCall { id, name, input });
+                }
+                AnthBlock::Text(_) | AnthBlock::Tool { .. } => {}
+            }
+        }
+        ReasonResponse {
+            content,
+            usage: Usage {
+                input_tokens: self.input_tokens,
+                output_tokens: self.output_tokens,
+                cache_tokens: self.cache_tokens,
+            },
+            cost: Cost::default(),
+            finish_reason: self.stop_reason.unwrap_or_else(|| "end_turn".into()),
+            latency_ms: self.started.map_or(0, |s| s.elapsed().as_millis() as u32),
+        }
+    }
 }
 
 #[async_trait]
@@ -194,8 +383,96 @@ impl BrainAdapter for Anthropic {
         })
     }
 
-    async fn stream(&self, _req: ReasonRequest) -> Result<BoxStream<'static, Result<ReasonChunk>>> {
-        Err(CoreError::Other("streaming not implemented in v0.1".into()))
+    async fn stream(&self, req: ReasonRequest) -> Result<BoxStream<'static, Result<ReasonChunk>>> {
+        let body = build_request_inner(&self.model, &req, true);
+        debug!(model = %self.model, "anthropic stream request");
+
+        let resp = self
+            .client
+            .post(format!("{}/v1/messages", self.base_url))
+            .header("x-api-key", self.api_key.as_str())
+            .header("anthropic-version", "2023-06-01")
+            .header("content-type", "application/json")
+            .header("accept", "text/event-stream")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| CoreError::Other(format!("anthropic: {e}")))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(CoreError::Other(format!("anthropic {status}: {text}")));
+        }
+
+        let events = crate::sse::sse_data_stream(resp.bytes_stream());
+        let init = AnthropicStreamState::Active {
+            stream: Box::pin(events),
+            acc: AnthropicStreamAcc::default(),
+        };
+        let out = futures::stream::unfold(init, |state| async move {
+            let AnthropicStreamState::Active {
+                mut stream,
+                mut acc,
+            } = state
+            else {
+                return None;
+            };
+            loop {
+                match stream.next().await {
+                    Some(Ok(data)) => {
+                        let ev: AnthropicStreamEvent = match serde_json::from_str(&data) {
+                            Ok(e) => e,
+                            Err(_) => continue,
+                        };
+                        match ev.kind.as_str() {
+                            "error" => {
+                                let message = ev
+                                    .error
+                                    .map_or_else(|| "anthropic stream error".into(), |e| e.message);
+                                return Some((
+                                    Ok(ReasonChunk::Error { message }),
+                                    AnthropicStreamState::Done,
+                                ));
+                            }
+                            "message_stop" => {
+                                let resp = acc.finish();
+                                return Some((
+                                    Ok(ReasonChunk::Final { response: resp }),
+                                    AnthropicStreamState::Done,
+                                ));
+                            }
+                            _ => {
+                                if let Some(delta) = acc.ingest(ev)
+                                    && !delta.is_empty()
+                                {
+                                    return Some((
+                                        Ok(ReasonChunk::Text { delta }),
+                                        AnthropicStreamState::Active { stream, acc },
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    Some(Err(e)) => {
+                        return Some((
+                            Ok(ReasonChunk::Error {
+                                message: e.to_string(),
+                            }),
+                            AnthropicStreamState::Done,
+                        ));
+                    }
+                    None => {
+                        let resp = acc.finish();
+                        return Some((
+                            Ok(ReasonChunk::Final { response: resp }),
+                            AnthropicStreamState::Done,
+                        ));
+                    }
+                }
+            }
+        });
+        Ok(Box::pin(out))
     }
 
     fn estimate_cost(&self, _req: &ReasonRequest) -> CostEstimate {
@@ -226,6 +503,14 @@ impl BrainAdapter for Anthropic {
 }
 
 fn build_request<'a>(model: &'a str, req: &'a ReasonRequest) -> AnthropicRequest<'a> {
+    build_request_inner(model, req, false)
+}
+
+fn build_request_inner<'a>(
+    model: &'a str,
+    req: &'a ReasonRequest,
+    stream: bool,
+) -> AnthropicRequest<'a> {
     let messages: Vec<Value> = req
         .messages
         .iter()
@@ -251,6 +536,7 @@ fn build_request<'a>(model: &'a str, req: &'a ReasonRequest) -> AnthropicRequest
         tools: req.tools.clone(),
         temperature: Some(req.temperature),
         stop_seq: req.stop_seq.clone(),
+        stream,
     }
 }
 
@@ -369,5 +655,62 @@ mod tests {
         assert!(matches!(back, MessageContent::Text(s) if s == "hello"));
         let back: MessageContent = serde_json::from_value(v).unwrap();
         assert!(matches!(back, MessageContent::Blocks(_)));
+    }
+
+    fn ev(json: &str) -> AnthropicStreamEvent {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn stream_acc_accumulates_text_blocks() {
+        let mut acc = AnthropicStreamAcc::default();
+        acc.ingest(ev(
+            r#"{"type":"message_start","message":{"usage":{"input_tokens":11,"output_tokens":1}}}"#,
+        ));
+        acc.ingest(ev(
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"text"}}"#,
+        ));
+        let d = acc.ingest(ev(
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}"#,
+        ));
+        assert_eq!(d.as_deref(), Some("Hi"));
+        acc.ingest(ev(
+            r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}"#,
+        ));
+        let resp = acc.finish();
+        assert_eq!(resp.finish_reason, "end_turn");
+        assert_eq!(resp.usage.input_tokens, 11);
+        assert_eq!(resp.usage.output_tokens, 5);
+        match &resp.content[0] {
+            ContentBlock::Text { text } => assert_eq!(text, "Hi"),
+            other => panic!("expected text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stream_acc_assembles_tool_use_from_partial_json() {
+        let mut acc = AnthropicStreamAcc::default();
+        acc.ingest(ev(
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_9","name":"bash"}}"#,
+        ));
+        acc.ingest(ev(
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"cmd\":"}}"#,
+        ));
+        acc.ingest(ev(
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"ls\"}"}}"#,
+        ));
+        acc.ingest(ev(
+            r#"{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":9}}"#,
+        ));
+        let resp = acc.finish();
+        assert_eq!(resp.finish_reason, "tool_use");
+        match &resp.content[0] {
+            ContentBlock::ToolCall { id, name, input } => {
+                assert_eq!(id, "toolu_9");
+                assert_eq!(name, "bash");
+                assert_eq!(input["cmd"], "ls");
+            }
+            other => panic!("expected tool call, got {other:?}"),
+        }
     }
 }

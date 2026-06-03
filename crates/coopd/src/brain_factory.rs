@@ -11,7 +11,8 @@
 
 use std::sync::Arc;
 
-use coopd_brain::{Anthropic, CachingBrain, OpenAi, RoutingBrain, router::models};
+use coopd_brain::{Anthropic, CachingBrain, FallbackBrain, OpenAi, RoutingBrain, router::models};
+use coopd_core::manifest::FallbackSpec;
 use coopd_core::{AgentManifest, BrainAdapter, CoreError, Result};
 use coopd_vault::{AzureKeyVault, AzureSecretRef, Vault};
 use once_cell::sync::OnceCell;
@@ -67,33 +68,38 @@ impl BrainFactory {
 
     /// Build a brain adapter from a manifest.
     pub async fn build(&self, manifest: &AgentManifest) -> Result<Arc<dyn BrainAdapter>> {
-        let provider = &manifest.brain.provider_id;
         let model = manifest.brain.model.clone();
 
-        let api_key = self.resolve_key(provider).await?;
+        // Primary adapter (honors auto_route for the Anthropic tiering).
+        let primary = self
+            .build_single(
+                &manifest.brain.provider,
+                &manifest.brain.provider_id,
+                &model,
+                manifest.brain.base_url.as_deref(),
+                manifest.brain.auto_route,
+            )
+            .await?;
 
-        // Layer:  optional_cache( optional_routing( base ) )
-        let base: Arc<dyn BrainAdapter> = match manifest.brain.provider.as_str() {
-            "anthropic" if manifest.brain.auto_route => {
-                let haiku: Arc<dyn BrainAdapter> =
-                    Arc::new(Anthropic::new(api_key.clone(), models::HAIKU.to_string()));
-                let sonnet: Arc<dyn BrainAdapter> =
-                    Arc::new(Anthropic::new(api_key.clone(), models::SONNET.to_string()));
-                let opus: Arc<dyn BrainAdapter> =
-                    Arc::new(Anthropic::new(api_key, models::OPUS.to_string()));
-                Arc::new(RoutingBrain::new(haiku, sonnet, opus))
+        // Optional fallback chain: each entry is a full brain spec; on a failed
+        // primary call the runtime tries them in order.
+        let base: Arc<dyn BrainAdapter> = if manifest.brain.fallbacks.is_empty() {
+            primary
+        } else {
+            let mut chain: Vec<Arc<dyn BrainAdapter>> = Vec::new();
+            for fb in &manifest.brain.fallbacks {
+                let FallbackSpec {
+                    provider_id,
+                    provider,
+                    base_url,
+                    model: fb_model,
+                } = fb;
+                let adapter = self
+                    .build_single(provider, provider_id, fb_model, base_url.as_deref(), false)
+                    .await?;
+                chain.push(adapter);
             }
-            "anthropic" => Arc::new(Anthropic::new(api_key, model.clone())),
-            "openai" => Arc::new(OpenAi::new(api_key, model.clone())),
-            "openai-compat" => {
-                let base_url = manifest.brain.base_url.clone().ok_or_else(|| {
-                    CoreError::Other("provider openai-compat requires brain.base_url".into())
-                })?;
-                Arc::new(OpenAi::new(api_key, model.clone()).with_base_url(base_url))
-            }
-            other => {
-                return Err(CoreError::Other(format!("unknown brain.provider: {other}")));
-            }
+            Arc::new(FallbackBrain::new(primary, chain))
         };
 
         if manifest.brain.cache {
@@ -108,6 +114,43 @@ impl BrainFactory {
         } else {
             Ok(base)
         }
+    }
+
+    /// Build a single concrete adapter for one provider spec. `auto_route` only
+    /// applies to the `anthropic` provider (which tiers across Haiku/Sonnet/Opus);
+    /// other providers ignore it and use the single `model`.
+    async fn build_single(
+        &self,
+        provider: &str,
+        provider_id: &str,
+        model: &str,
+        base_url: Option<&str>,
+        auto_route: bool,
+    ) -> Result<Arc<dyn BrainAdapter>> {
+        let api_key = self.resolve_key(provider_id).await?;
+        let adapter: Arc<dyn BrainAdapter> = match provider {
+            "anthropic" if auto_route => {
+                let haiku: Arc<dyn BrainAdapter> =
+                    Arc::new(Anthropic::new(api_key.clone(), models::HAIKU.to_string()));
+                let sonnet: Arc<dyn BrainAdapter> =
+                    Arc::new(Anthropic::new(api_key.clone(), models::SONNET.to_string()));
+                let opus: Arc<dyn BrainAdapter> =
+                    Arc::new(Anthropic::new(api_key, models::OPUS.to_string()));
+                Arc::new(RoutingBrain::new(haiku, sonnet, opus))
+            }
+            "anthropic" => Arc::new(Anthropic::new(api_key, model.to_string())),
+            "openai" => Arc::new(OpenAi::new(api_key, model.to_string())),
+            "openai-compat" => {
+                let url = base_url.ok_or_else(|| {
+                    CoreError::Other("provider openai-compat requires base_url".into())
+                })?;
+                Arc::new(OpenAi::new(api_key, model.to_string()).with_base_url(url.to_string()))
+            }
+            other => {
+                return Err(CoreError::Other(format!("unknown brain.provider: {other}")));
+            }
+        };
+        Ok(adapter)
     }
 
     /// Resolve a `provider_id` to a plaintext API key from the appropriate
