@@ -15,6 +15,18 @@ workspace = true
 name = "coop"
 path = "src/main.rs"
 
+# cargo-binstall: install prebuilt binaries from GitHub releases instead of
+# compiling from source (`cargo binstall coop-cli`). The release archives are
+# named `coop-v{version}-{target}.tar.gz` and unpack to a `coop-v{version}-{target}/`
+# directory holding the `coop` and `coopd` binaries (see .github/workflows/release.yml).
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/coop-v{ version }-{ target }{ archive-suffix }"
+pkg-fmt = "tgz"
+bin-dir = "coop-v{ version }-{ target }/{ bin }{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
 [dependencies]
 coopd-core = { workspace = true }
 coopd-vault = { workspace = true }

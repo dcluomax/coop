@@ -45,6 +45,39 @@ jobs:
         with:
           command: check licenses bans sources advisories
 
+  arm-build:
+    name: arm compile check (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native arm64 runner — same path the release uses for aarch64.
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            cross: false
+          # armv7 (Pi Zero 2 / 32-bit Pi OS) has no native runner; use cross.
+          - target: armv7-unknown-linux-gnueabihf
+            os: ubuntu-latest
+            cross: true
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.91.1
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --locked --version 0.2.5
+      - name: compile check (cargo)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release --target ${{ matrix.target }} --bin coopd --bin coop
+      - name: compile check (cross)
+        if: matrix.cross
+        run: cross build --release --target ${{ matrix.target }} --bin coopd --bin coop
+
   windows-build:
     name: windows compile check
     runs-on: windows-latest

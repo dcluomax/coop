@@ -19,7 +19,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
-repository = "https://github.com/coop-network/coop"
+repository = "https://github.com/dcluomax/coop"
 homepage = "https://coop.network"
 authors = ["The Coop Authors"]
 

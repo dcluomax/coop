@@ -22,11 +22,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Raspberry Pi 3/4/5 (64-bit Raspberry Pi OS, Ubuntu arm64)
+          # Raspberry Pi 3/4/5 (64-bit Raspberry Pi OS, Ubuntu arm64).
+          # Built natively on GitHub's hosted arm64 runner (no QEMU/cross) —
+          # faster and avoids the stagnant `cross` toolchain for this target.
           - name: linux-aarch64 (Raspberry Pi 64-bit)
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            cross: true
+            cross: false
             archive: tar.gz
           # Older 32-bit Raspberry Pi OS (Pi Zero 2, legacy Pi 3/4 installs)
           - name: linux-armv7 (Raspberry Pi 32-bit)
