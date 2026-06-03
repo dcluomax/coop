@@ -200,9 +200,64 @@ jobs:
             coop-${{ steps.ver.outputs.tag }}-universal-apple-darwin.tar.gz
             coop-${{ steps.ver.outputs.tag }}-universal-apple-darwin.tar.gz.sha256
 
+  debian:
+    name: deb (${{ matrix.debarch }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - debarch: amd64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            cross: false
+          - debarch: arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            cross: false
+          - debarch: armhf
+            os: ubuntu-latest
+            target: armv7-unknown-linux-gnueabihf
+            cross: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.91.1
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: deb-${{ matrix.target }}
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --locked --version 0.2.5
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+      - name: Build binaries (cargo)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release --target ${{ matrix.target }} --bin coopd --bin coop
+      - name: Build binaries (cross)
+        if: matrix.cross
+        run: cross build --release --target ${{ matrix.target }} --bin coopd --bin coop
+      - name: Package .deb
+        run: cargo deb -p coopd --target ${{ matrix.target }} --no-build --no-strip
+      - name: Stage .deb
+        id: deb
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p debout
+          cp target/${{ matrix.target }}/debian/*.deb debout/
+          ls -la debout/
+      - uses: actions/upload-artifact@v5
+        with:
+          name: coop-deb-${{ matrix.debarch }}
+          path: debout/*.deb
+
   publish:
     name: publish github release
-    needs: [build, macos-universal]
+    needs: [build, macos-universal, debian]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -215,7 +270,7 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p out
-          find dist -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" \) \
+          find dist -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" -o -name "*.deb" \) \
             -exec cp {} out/ \;
           ls -la out/
       - name: Create / update release
@@ -255,3 +310,56 @@ jobs:
             cd coop-*\
             .\coopd.exe --help
             ```
+
+  homebrew:
+    name: homebrew formula
+    needs: publish
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Render formula from release checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"      # e.g. v0.2.0
+          version="${tag#v}"            # e.g. 0.2.0
+          mkdir -p sums
+          gh release download "$tag" -D sums \
+            -p "coop-${tag}-universal-apple-darwin.tar.gz.sha256" \
+            -p "coop-${tag}-aarch64-unknown-linux-gnu.tar.gz.sha256" \
+            -p "coop-${tag}-x86_64-unknown-linux-gnu.tar.gz.sha256"
+          mac=$(awk '{print $1}' "sums/coop-${tag}-universal-apple-darwin.tar.gz.sha256")
+          arm=$(awk '{print $1}' "sums/coop-${tag}-aarch64-unknown-linux-gnu.tar.gz.sha256")
+          x86=$(awk '{print $1}' "sums/coop-${tag}-x86_64-unknown-linux-gnu.tar.gz.sha256")
+          sed \
+            -e "s/__VERSION__/${version}/g" \
+            -e "s/__MACOS_UNIVERSAL_SHA256__/${mac}/" \
+            -e "s/__LINUX_ARM64_SHA256__/${arm}/" \
+            -e "s/__LINUX_X86_64_SHA256__/${x86}/" \
+            packaging/homebrew/coop.rb > coop.rb
+          echo "--- rendered formula ---"
+          cat coop.rb
+      - name: Attach formula to release
+        shell: bash
+        run: gh release upload "${GITHUB_REF_NAME}" coop.rb --clobber
+      - name: Publish to Homebrew tap
+        if: ${{ env.TAP_TOKEN != '' }}
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/dcluomax/homebrew-coop.git" tap
+          mkdir -p tap/Formula
+          cp coop.rb tap/Formula/coop.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/coop.rb
+          git commit -m "coop ${GITHUB_REF_NAME}" || { echo "no changes"; exit 0; }
+          git push

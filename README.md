@@ -68,6 +68,8 @@ in `target/release/`.
 | Target | Command |
 |--------|---------|
 | 🐳 **Docker** | `docker compose up -d` ([compose](./docker-compose.yml)) |
+| 🍺 **Homebrew** | `brew install dcluomax/coop/coop` (macOS + Linux) |
+| 📦 **Debian/Ubuntu/Pi** | `sudo apt install ./coop_*_<arch>.deb` (amd64 · arm64 · armhf) |
 | 🛠️ **systemd** | `contrib/systemd/coopd.service` (24/7 bare metal) |
 | 📥 **Binaries** | [latest release](https://github.com/dcluomax/coop/releases/latest) — 7 platforms, SHA-256 checksums |
 | 📦 **cargo-binstall** | `cargo binstall coop-cli` — fetches the prebuilt release binary for your platform |
