@@ -36,6 +36,11 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
   list = bot is dormant.
 - **L1** — Farm UI's xterm.js + addon CDN scripts now carry SRI
   (`integrity="sha384-…"`).
+- **Sandbox phase-1 hardening (Linux `bwrap`).** The bash sandbox now (a) runs
+  with a locked, fixed `PATH` instead of inheriting the host's; (b) passes
+  `--new-session` to defeat the `TIOCSTI` terminal-injection escape
+  (CVE-2017-5226); and (c) prepends a `ulimit` prologue capping CPU time and
+  output file size. Landlock filesystem confinement is deferred to phase-2.
 - **LP1 (lease policy)** — `manifest.lease` gains three enforcement knobs:
   - `require_framework: bool` (default **true**). When `allow_lease: true`,
     the agent's `brain.kind` is rejected at manifest-validation time unless
@@ -68,6 +73,21 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
   `AZURE_AUTHORITY_HOST`. The fetched secret is held in `Zeroizing` memory and
   never written to disk. New module `coopd_vault::azure`. See
   [docs/configuration.md](./docs/configuration.md#azure-key-vault).
+
+- **OpenAI + OpenAI-compatible brains.** A Hen manifest may now set
+  `brain.provider` to `openai` (api.openai.com) or `openai-compat` (any
+  Chat Completions endpoint — Ollama, vLLM, LM Studio, OpenRouter, Groq…)
+  alongside the default `anthropic`. `openai-compat` requires a
+  `brain.base_url` (http(s); the cloud-metadata endpoint is refused). Keyless
+  local servers use the `provider_id: none` sentinel. New adapter
+  `coopd_brain::OpenAi` translates Coop's structured tool blocks to and from
+  OpenAI `tool_calls`/`role:tool` messages and normalizes `finish_reason`.
+  See [docs/configuration.md](./docs/configuration.md#brain-providers).
+
+- **Structured tool-call fidelity.** Assistant/tool turns now round-trip as
+  typed `tool_use`/`tool_result` content blocks (carrying the provider tool-use
+  `id` and an `is_error` flag) instead of being flattened to plaintext, so
+  multi-turn tool conversations survive across providers.
 
 ### Changed
 - **Open-core split.** `coopd-market` has been moved out of the OSS workspace

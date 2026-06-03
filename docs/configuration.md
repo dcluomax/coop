@@ -77,6 +77,53 @@ brain:
 Secrets fetched from Azure Key Vault are held in memory only (zeroized on drop)
 and never persisted to the local vault file.
 
+## Brain providers
+
+A Hen's `brain.provider` selects **which model API the adapter speaks**.
+It is independent of `brain.provider_id` (which selects where the *key* is
+read from, see above). Default is `anthropic`, so v0.1 manifests are unchanged.
+
+| `brain.provider` | Endpoint | Notes |
+|------------------|----------|-------|
+| `anthropic` (default) | Anthropic Messages API | Honors `brain.auto_route` (Haiku/Sonnet/Opus tiering). |
+| `openai` | `https://api.openai.com/v1/chat/completions` | Single `brain.model`; `auto_route` is ignored. |
+| `openai-compat` | Any OpenAI-compatible Chat Completions server | Requires `brain.base_url`. Works with Ollama, vLLM, LM Studio, OpenRouter, Groq, etc. |
+
+For `openai-compat`, `brain.base_url` must be an `http(s)` URL and may not
+target the cloud-metadata endpoint (`169.254.169.254`). Local servers that
+need no API key use the `provider_id: none` sentinel, which yields an empty
+key and skips the vault lookup.
+
+```yaml
+# Hosted OpenAI
+brain:
+  provider_id: vault:byok-openai
+  provider: openai
+  model: gpt-4o-mini
+```
+
+```yaml
+# Local Ollama (keyless)
+brain:
+  provider_id: none
+  provider: openai-compat
+  base_url: http://localhost:11434/v1
+  model: llama3.1
+```
+
+```yaml
+# OpenRouter (BYOK key from the sealed vault)
+brain:
+  provider_id: vault:byok-openrouter
+  provider: openai-compat
+  base_url: https://openrouter.ai/api/v1
+  model: anthropic/claude-3.5-sonnet
+```
+
+Tool calls round-trip as structured `tool_use`/`tool_result` blocks across all
+providers; the OpenAI adapter translates them to and from OpenAI's
+`tool_calls` / `role:tool` message shape and normalizes `finish_reason`.
+
 ## CLI
 
 The `coop` CLI talks to `COOP_API` (default `http://127.0.0.1:9700`). Set it to
