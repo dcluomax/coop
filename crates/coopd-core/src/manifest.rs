@@ -156,6 +156,12 @@ pub struct BrainSpec {
     /// Required capabilities.
     #[serde(default)]
     pub capabilities_required: Option<BrainCapsRequired>,
+    /// Ordered fallback brains. On a failed call to the primary, the runtime
+    /// tries each fallback in order (first success wins). Each entry is a full
+    /// brain spec, so a Hen can fail over from e.g. Anthropic to a local
+    /// OpenAI-compatible model.
+    #[serde(default)]
+    pub fallbacks: Vec<FallbackSpec>,
     /// Ordered fallback providers.
     #[serde(default)]
     pub fallback_provider_ids: Vec<String>,
@@ -172,6 +178,55 @@ pub struct BrainSpec {
 /// Anthropic adapter, preserving v0.1 manifests unchanged.
 fn default_provider() -> String {
     "anthropic".to_string()
+}
+
+/// A single fallback brain. Mirrors the provider-selection fields of
+/// [`BrainSpec`] (key reference + adapter kind + model + optional base URL).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FallbackSpec {
+    /// Where this fallback's API key is read from (`vault:…`, `azure-kv://…`,
+    /// or the `none` sentinel for keyless local servers).
+    pub provider_id: String,
+    /// Adapter kind: `anthropic` (default), `openai`, or `openai-compat`.
+    #[serde(default = "default_provider")]
+    pub provider: String,
+    /// Base URL override (required for `openai-compat`).
+    #[serde(default)]
+    pub base_url: Option<String>,
+    /// Model name.
+    pub model: String,
+}
+
+/// Validate a brain provider selection (used for both the primary brain and
+/// each fallback). `ctx` labels the field path in error messages.
+fn validate_brain_provider(ctx: &str, provider: &str, base_url: Option<&str>) -> Result<()> {
+    match provider {
+        "anthropic" | "openai" => Ok(()),
+        "openai-compat" => {
+            let url = base_url.unwrap_or_default();
+            if url.is_empty() {
+                return Err(CoreError::InvalidManifest(format!(
+                    "{ctx}.base_url is required for provider openai-compat"
+                )));
+            }
+            if !(url.starts_with("http://") || url.starts_with("https://")) {
+                return Err(CoreError::InvalidManifest(format!(
+                    "{ctx}.base_url must be an http(s) URL"
+                )));
+            }
+            // Block the well-known cloud-metadata endpoint to blunt the obvious
+            // SSRF pivot via an operator-supplied base_url.
+            if url.contains("169.254.169.254") {
+                return Err(CoreError::InvalidManifest(format!(
+                    "{ctx}.base_url must not target the cloud metadata endpoint"
+                )));
+            }
+            Ok(())
+        }
+        other => Err(CoreError::InvalidManifest(format!(
+            "unknown {ctx}.provider: {other}"
+        ))),
+    }
 }
 
 /// Brain capability requirements.
@@ -381,6 +436,7 @@ impl AgentManifest {
                 base_url: None,
                 model: "claude-sonnet-4.6".to_string(),
                 capabilities_required: None,
+                fallbacks: vec![],
                 fallback_provider_ids: vec![],
                 auto_route: false,
                 cache: false,
@@ -437,33 +493,30 @@ impl AgentManifest {
             if self.brain.model.is_empty() {
                 return Err(CoreError::InvalidManifest("brain.model empty".into()));
             }
-            match self.brain.provider.as_str() {
-                "anthropic" | "openai" => {}
-                "openai-compat" => {
-                    let url = self.brain.base_url.as_deref().unwrap_or_default();
-                    if url.is_empty() {
-                        return Err(CoreError::InvalidManifest(
-                            "brain.base_url is required for provider openai-compat".into(),
-                        ));
-                    }
-                    if !(url.starts_with("http://") || url.starts_with("https://")) {
-                        return Err(CoreError::InvalidManifest(
-                            "brain.base_url must be an http(s) URL".into(),
-                        ));
-                    }
-                    // Block the well-known cloud-metadata endpoint to blunt the
-                    // obvious SSRF pivot via an operator-supplied base_url.
-                    if url.contains("169.254.169.254") {
-                        return Err(CoreError::InvalidManifest(
-                            "brain.base_url must not target the cloud metadata endpoint".into(),
-                        ));
-                    }
-                }
-                other => {
+            validate_brain_provider(
+                "brain",
+                &self.brain.provider,
+                self.brain.base_url.as_deref(),
+            )?;
+
+            // Each declared fallback is a full brain spec and must validate the
+            // same way as the primary.
+            for (i, fb) in self.brain.fallbacks.iter().enumerate() {
+                if fb.provider_id.is_empty() {
                     return Err(CoreError::InvalidManifest(format!(
-                        "unknown brain.provider: {other}"
+                        "brain.fallbacks[{i}].provider_id empty"
                     )));
                 }
+                if fb.model.is_empty() {
+                    return Err(CoreError::InvalidManifest(format!(
+                        "brain.fallbacks[{i}].model empty"
+                    )));
+                }
+                validate_brain_provider(
+                    &format!("brain.fallbacks[{i}]"),
+                    &fb.provider,
+                    fb.base_url.as_deref(),
+                )?;
             }
         }
         // Leasing safety: if this hen is offered for lease and the owner
@@ -608,6 +661,45 @@ brain:
   provider: openai-compat
   base_url: http://169.254.169.254/v1
   model: m
+tools: [bash]
+"#;
+        assert!(AgentManifest::parse_yaml(yaml).is_err());
+    }
+
+    #[test]
+    fn fallbacks_parse_and_validate() {
+        let yaml = r#"
+spec_version: coop/v1
+name: resilient
+brain:
+  provider_id: vault:byok-anthropic
+  model: claude-sonnet-4.6
+  fallbacks:
+    - provider_id: none
+      provider: openai-compat
+      base_url: http://localhost:11434/v1
+      model: llama3.1
+tools: [bash]
+"#;
+        let m = AgentManifest::parse_yaml(yaml).unwrap();
+        assert_eq!(m.brain.fallbacks.len(), 1);
+        assert_eq!(m.brain.fallbacks[0].provider, "openai-compat");
+        assert_eq!(m.brain.fallbacks[0].model, "llama3.1");
+    }
+
+    #[test]
+    fn invalid_fallback_is_rejected() {
+        // openai-compat fallback missing its required base_url.
+        let yaml = r#"
+spec_version: coop/v1
+name: resilient
+brain:
+  provider_id: vault:byok-anthropic
+  model: claude-sonnet-4.6
+  fallbacks:
+    - provider_id: none
+      provider: openai-compat
+      model: llama3.1
 tools: [bash]
 "#;
         assert!(AgentManifest::parse_yaml(yaml).is_err());

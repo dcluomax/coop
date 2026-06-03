@@ -124,6 +124,37 @@ Tool calls round-trip as structured `tool_use`/`tool_result` blocks across all
 providers; the OpenAI adapter translates them to and from OpenAI's
 `tool_calls` / `role:tool` message shape and normalizes `finish_reason`.
 
+Both adapters also support **streaming** (`BrainAdapter::stream`): provider SSE
+streams are decoded into incremental text deltas plus a final assembled
+response.
+
+## Fallback brains
+
+`brain.fallbacks` is an ordered list of full brain specs. When a call to the
+primary brain fails (network error, rate limit, provider outage), the runtime
+transparently retries each fallback in order and the first success wins. Each
+entry takes the same fields as `brain` (`provider_id`, `provider`, `base_url`,
+`model`) and is validated identically.
+
+```yaml
+brain:
+  provider_id: vault:byok-anthropic
+  provider: anthropic
+  model: claude-sonnet-4.6
+  fallbacks:
+    # 1st choice on failure: OpenAI
+    - provider_id: vault:byok-openai
+      provider: openai
+      model: gpt-4o-mini
+    # last resort: a keyless local model that's always reachable
+    - provider_id: none
+      provider: openai-compat
+      base_url: http://localhost:11434/v1
+      model: llama3.1
+```
+
+A Hen with fallbacks reports healthy if *any* link in the chain is reachable.
+
 ## CLI
 
 The `coop` CLI talks to `COOP_API` (default `http://127.0.0.1:9700`). Set it to
