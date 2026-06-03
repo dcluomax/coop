@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use coopd_core::{
     BrainAdapter, CoreError, Hen, Job, ReasonRequest, Result, ToolCtx,
-    brain::{ContentBlock, Message},
+    brain::{ContentBlock, Message, MessageContent},
 };
 use coopd_tools::Registry;
 use serde_json::json;
@@ -106,7 +106,7 @@ async fn reason_loop(
 
     let mut messages: Vec<Message> = vec![Message {
         role: "user".into(),
-        content: job.prompt.clone(),
+        content: job.prompt.clone().into(),
     }];
 
     // If the hen is currently leased, advertise only the lease-allowed
@@ -160,34 +160,49 @@ async fn reason_loop(
         let resp = brain.reason(req).await?;
         job.grain_spent = job.grain_spent.saturating_add(resp.cost.grain);
 
-        let mut tool_results: Vec<(String, String)> = Vec::new();
+        // Replay the assistant turn structurally: any text plus the exact
+        // `tool_use` blocks it emitted, then answer each with a correlated
+        // `tool_result` block in the following user turn. This preserves
+        // tool-call fidelity across multi-turn conversations (no plaintext
+        // re-encoding, ids threaded through).
+        let mut assistant_blocks: Vec<ContentBlock> = Vec::new();
+        let mut tool_result_blocks: Vec<ContentBlock> = Vec::new();
         for block in resp.content {
             match block {
                 ContentBlock::Text { text } => {
                     if !text.trim().is_empty() {
                         last_text = text.clone();
                     }
-                    messages.push(Message {
-                        role: "assistant".into(),
-                        content: text,
-                    });
+                    assistant_blocks.push(ContentBlock::Text { text });
                 }
-                ContentBlock::Thinking { .. } => {}
-                ContentBlock::ToolCall { name, input } => {
-                    let result = invoke_tool(tools, workdir, hen, job, &name, input).await;
-                    tool_results.push((name, result));
+                ContentBlock::Thinking { .. } | ContentBlock::ToolResult { .. } => {}
+                ContentBlock::ToolCall { id, name, input } => {
+                    let (result, is_error) =
+                        invoke_tool(tools, workdir, hen, job, &name, input.clone()).await;
+                    assistant_blocks.push(ContentBlock::ToolCall {
+                        id: id.clone(),
+                        name,
+                        input,
+                    });
+                    tool_result_blocks.push(ContentBlock::ToolResult {
+                        tool_use_id: id,
+                        content: result,
+                        is_error,
+                    });
                 }
             }
         }
-        if tool_results.is_empty() {
+        if tool_result_blocks.is_empty() {
             return Ok(last_text);
         }
-        for (name, result) in tool_results {
-            messages.push(Message {
-                role: "user".into(),
-                content: format!("[tool {name} result]\n{result}"),
-            });
-        }
+        messages.push(Message {
+            role: "assistant".into(),
+            content: MessageContent::Blocks(assistant_blocks),
+        });
+        messages.push(Message {
+            role: "user".into(),
+            content: MessageContent::Blocks(tool_result_blocks),
+        });
         if resp.finish_reason == "end_turn" {
             return Ok(last_text);
         }
@@ -204,7 +219,7 @@ async fn invoke_tool(
     job: &Job,
     name: &str,
     input: serde_json::Value,
-) -> String {
+) -> (String, bool) {
     // Lease enforcement (hard wall): if the hen is leased and the policy
     // either restricts the tool list or disallows this name, refuse before
     // we even look the tool up.
@@ -222,12 +237,15 @@ async fn invoke_tool(
         {
             if !allow.iter().any(|t| t == name) {
                 warn!(tool = name, %job.id, "lease policy denied tool call");
-                return format!("ERROR: tool `{name}` is not permitted by the active lease policy");
+                return (
+                    format!("ERROR: tool `{name}` is not permitted by the active lease policy"),
+                    true,
+                );
             }
         }
     }
     let Some(tool) = tools.get(name) else {
-        return format!("ERROR: unknown tool `{name}`");
+        return (format!("ERROR: unknown tool `{name}`"), true);
     };
     let ctx = ToolCtx {
         agent_id: job.hen_id.to_string(),
@@ -239,7 +257,10 @@ async fn invoke_tool(
     };
     debug!(tool = name, %job.id, "invoking tool");
     match tool.invoke(&ctx, input).await {
-        Ok(v) => serde_json::to_string(&v).unwrap_or_else(|e| format!("ERROR serialize: {e}")),
-        Err(e) => format!("ERROR: {e}"),
+        Ok(v) => (
+            serde_json::to_string(&v).unwrap_or_else(|e| format!("ERROR serialize: {e}")),
+            false,
+        ),
+        Err(e) => (format!("ERROR: {e}"), true),
     }
 }

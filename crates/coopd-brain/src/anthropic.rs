@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use coopd_core::{
     BrainAdapter, BrainCaps, CoreError, ReasonRequest, ReasonResponse, Result, Tier,
-    brain::{ContentBlock, Cost, CostEstimate, Message, ReasonChunk, Usage},
+    brain::{ContentBlock, Cost, CostEstimate, Message, MessageContent, ReasonChunk, Usage},
 };
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
@@ -110,7 +110,6 @@ enum AnthropicContent {
     Text { text: String },
     #[serde(rename = "tool_use")]
     ToolUse {
-        #[allow(dead_code)]
         id: String,
         name: String,
         input: Value,
@@ -173,8 +172,8 @@ impl BrainAdapter for Anthropic {
             .into_iter()
             .map(|c| match c {
                 AnthropicContent::Text { text } => ContentBlock::Text { text },
-                AnthropicContent::ToolUse { name, input, .. } => {
-                    ContentBlock::ToolCall { name, input }
+                AnthropicContent::ToolUse { id, name, input } => {
+                    ContentBlock::ToolCall { id, name, input }
                 }
                 AnthropicContent::Thinking { thinking } => {
                     ContentBlock::Thinking { text: thinking }
@@ -230,7 +229,15 @@ fn build_request<'a>(model: &'a str, req: &'a ReasonRequest) -> AnthropicRequest
     let messages: Vec<Value> = req
         .messages
         .iter()
-        .map(|m| json!({ "role": m.role, "content": m.content }))
+        .map(|m| {
+            let content = match &m.content {
+                MessageContent::Text(s) => json!(s),
+                MessageContent::Blocks(blocks) => {
+                    Value::Array(blocks.iter().map(block_to_anthropic).collect())
+                }
+            };
+            json!({ "role": m.role, "content": content })
+        })
         .collect();
     AnthropicRequest {
         model,
@@ -244,5 +251,123 @@ fn build_request<'a>(model: &'a str, req: &'a ReasonRequest) -> AnthropicRequest
         tools: req.tools.clone(),
         temperature: Some(req.temperature),
         stop_seq: req.stop_seq.clone(),
+    }
+}
+
+/// Render one Coop [`ContentBlock`] into an Anthropic Messages API content
+/// block. `tool_use` carries the `id` so a following `tool_result` correlates;
+/// `Thinking` degrades to plain text (Anthropic does not accept replayed
+/// `thinking` blocks on input).
+fn block_to_anthropic(block: &ContentBlock) -> Value {
+    match block {
+        ContentBlock::Text { text } | ContentBlock::Thinking { text } => {
+            json!({ "type": "text", "text": text })
+        }
+        ContentBlock::ToolCall { id, name, input } => json!({
+            "type": "tool_use",
+            "id": id,
+            "name": name,
+            "input": input,
+        }),
+        ContentBlock::ToolResult {
+            tool_use_id,
+            content,
+            is_error,
+        } => json!({
+            "type": "tool_result",
+            "tool_use_id": tool_use_id,
+            "content": content,
+            "is_error": is_error,
+        }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use coopd_core::ReasonRequest;
+
+    fn req_with(messages: Vec<Message>) -> ReasonRequest {
+        ReasonRequest {
+            system: "sys".into(),
+            messages,
+            tools: vec![],
+            temperature: 0.5,
+            max_tokens: 256,
+            stop_seq: vec![],
+            stream: false,
+            metadata: Default::default(),
+        }
+    }
+
+    #[test]
+    fn text_message_renders_as_string_content() {
+        let req = req_with(vec![Message {
+            role: "user".into(),
+            content: "hi".into(),
+        }]);
+        let body = build_request("m", &req);
+        assert_eq!(body.messages[0]["role"], "user");
+        assert_eq!(body.messages[0]["content"], json!("hi"));
+    }
+
+    #[test]
+    fn structured_tool_use_and_result_round_trip_to_wire() {
+        let assistant = Message {
+            role: "assistant".into(),
+            content: MessageContent::Blocks(vec![
+                ContentBlock::Text {
+                    text: "let me check".into(),
+                },
+                ContentBlock::ToolCall {
+                    id: "toolu_1".into(),
+                    name: "bash".into(),
+                    input: json!({ "command": "ls" }),
+                },
+            ]),
+        };
+        let user = Message {
+            role: "user".into(),
+            content: MessageContent::Blocks(vec![ContentBlock::ToolResult {
+                tool_use_id: "toolu_1".into(),
+                content: "a.txt".into(),
+                is_error: false,
+            }]),
+        };
+        let req = req_with(vec![assistant, user]);
+        let body = build_request("m", &req);
+
+        // Assistant turn: text block + tool_use block carrying the id.
+        let a = &body.messages[0]["content"];
+        assert_eq!(a[0]["type"], "text");
+        assert_eq!(a[1]["type"], "tool_use");
+        assert_eq!(a[1]["id"], "toolu_1");
+        assert_eq!(a[1]["name"], "bash");
+        assert_eq!(a[1]["input"]["command"], "ls");
+
+        // User turn: tool_result correlated by tool_use_id.
+        let u = &body.messages[1]["content"];
+        assert_eq!(u[0]["type"], "tool_result");
+        assert_eq!(u[0]["tool_use_id"], "toolu_1");
+        assert_eq!(u[0]["content"], "a.txt");
+        assert_eq!(u[0]["is_error"], false);
+    }
+
+    #[test]
+    fn message_content_is_untagged_in_json() {
+        // Text serializes as a bare string; Blocks as an array — preserving
+        // backward-compatible wire shape.
+        let text: MessageContent = "hello".into();
+        assert_eq!(serde_json::to_value(&text).unwrap(), json!("hello"));
+        let blocks = MessageContent::Blocks(vec![ContentBlock::Text { text: "x".into() }]);
+        let v = serde_json::to_value(&blocks).unwrap();
+        assert!(v.is_array());
+        assert_eq!(v[0]["type"], "text");
+
+        // And both deserialize back through the untagged enum.
+        let back: MessageContent = serde_json::from_value(json!("hello")).unwrap();
+        assert!(matches!(back, MessageContent::Text(s) if s == "hello"));
+        let back: MessageContent = serde_json::from_value(v).unwrap();
+        assert!(matches!(back, MessageContent::Blocks(_)));
     }
 }

@@ -43,11 +43,81 @@ pub struct BrainCaps {
 pub struct Message {
     /// Role: `user`, `assistant`, `system`, `tool`.
     pub role: String,
-    /// Content (plain text in v0.1; structured later).
-    pub content: String,
+    /// Message content: either a plain string or a sequence of structured
+    /// blocks (carrying `tool_use` / `tool_result` for multi-turn tool calls).
+    pub content: MessageContent,
 }
 
-/// One block of generated content.
+/// Body of a [`Message`].
+///
+/// Serialized **untagged** so a plain-text turn round-trips as a JSON string
+/// (`"content": "hi"`) and a structured turn as a JSON array
+/// (`"content": [ {...}, {...} ]`). This keeps wire compatibility with the
+/// v0.1 string-only representation while enabling structured tool blocks.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum MessageContent {
+    /// Plain text content.
+    Text(String),
+    /// A sequence of structured content blocks.
+    Blocks(Vec<ContentBlock>),
+}
+
+impl From<String> for MessageContent {
+    fn from(s: String) -> Self {
+        MessageContent::Text(s)
+    }
+}
+
+impl From<&str> for MessageContent {
+    fn from(s: &str) -> Self {
+        MessageContent::Text(s.to_string())
+    }
+}
+
+impl From<Vec<ContentBlock>> for MessageContent {
+    fn from(b: Vec<ContentBlock>) -> Self {
+        MessageContent::Blocks(b)
+    }
+}
+
+impl MessageContent {
+    /// A flat text view of this content, concatenating the textual payload of
+    /// every block. Used for length/keyword heuristics and logging — not for
+    /// wire serialization (which goes through each provider adapter).
+    #[must_use]
+    pub fn as_text(&self) -> String {
+        match self {
+            MessageContent::Text(s) => s.clone(),
+            MessageContent::Blocks(blocks) => {
+                let mut out = String::new();
+                for b in blocks {
+                    match b {
+                        ContentBlock::Text { text } | ContentBlock::Thinking { text } => {
+                            out.push_str(text);
+                        }
+                        ContentBlock::ToolCall { name, input, .. } => {
+                            out.push_str(name);
+                            out.push(' ');
+                            out.push_str(&input.to_string());
+                        }
+                        ContentBlock::ToolResult { content, .. } => out.push_str(content),
+                    }
+                    out.push('\n');
+                }
+                out
+            }
+        }
+    }
+
+    /// Character length of the flattened textual content.
+    #[must_use]
+    pub fn text_len(&self) -> usize {
+        self.as_text().chars().count()
+    }
+}
+
+/// One block of generated or replayed content.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
@@ -58,10 +128,25 @@ pub enum ContentBlock {
     },
     /// A tool invocation request.
     ToolCall {
+        /// Provider-assigned tool-use id, threaded back on the matching
+        /// [`ContentBlock::ToolResult`] so multi-turn tool conversations
+        /// stay correlated. May be empty for providers that omit ids.
+        #[serde(default)]
+        id: String,
         /// Tool name.
         name: String,
         /// JSON-encoded input.
         input: serde_json::Value,
+    },
+    /// The result of a previously-requested tool call, fed back to the model.
+    ToolResult {
+        /// The [`ContentBlock::ToolCall::id`] this result answers.
+        tool_use_id: String,
+        /// Tool output (serialized JSON or an error string).
+        content: String,
+        /// Whether `content` represents a tool failure.
+        #[serde(default)]
+        is_error: bool,
     },
     /// Reasoning trace (not always available).
     Thinking {

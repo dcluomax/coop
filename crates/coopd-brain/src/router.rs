@@ -31,8 +31,12 @@ pub enum Difficulty {
 /// Score a request's difficulty using length + keyword + tool heuristics.
 #[must_use]
 pub fn classify(req: &ReasonRequest) -> Difficulty {
-    let total_chars: usize =
-        req.system.len() + req.messages.iter().map(|m| m.content.len()).sum::<usize>();
+    let total_chars: usize = req.system.len()
+        + req
+            .messages
+            .iter()
+            .map(|m| m.content.text_len())
+            .sum::<usize>();
     let has_tools = !req.tools.is_empty();
     let needs_big_output = req.max_tokens >= 8_000;
 
@@ -41,7 +45,7 @@ pub fn classify(req: &ReasonRequest) -> Difficulty {
         .iter()
         .rev()
         .find(|m| m.role == "user")
-        .map(|m| m.content.to_lowercase())
+        .map(|m| m.content.as_text().to_lowercase())
         .unwrap_or_default();
 
     let hard_words = [
