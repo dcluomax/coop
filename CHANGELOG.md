@@ -89,7 +89,23 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
   `id` and an `is_error` flag) instead of being flattened to plaintext, so
   multi-turn tool conversations survive across providers.
 
+- **`cargo binstall` support.** `crates/coop-cli` now carries
+  `[package.metadata.binstall]` mapping the crate to the GitHub release archives,
+  so `cargo binstall coop-cli` installs the prebuilt `coop`/`coopd` binaries
+  without compiling from source.
+
+- **ARM compile-check in CI.** A new `arm-build` job compiles the
+  `aarch64-unknown-linux-gnu` (native arm64 runner) and
+  `armv7-unknown-linux-gnueabihf` (via `cross`) targets on every push/PR, so
+  ARM breakage is caught before a release tag instead of at release time.
+
 ### Changed
+- **Release toolchain.** `aarch64-unknown-linux-gnu` is now built natively on
+  GitHub's hosted `ubuntu-24.04-arm` runner instead of QEMU/`cross` — faster and
+  removes reliance on the stagnant `cross` toolchain for that target (`cross`
+  is now used only for the armv7 Pi build, which has no native runner).
+- **Fixed crate `repository` metadata** (`coop-network/coop` →
+  `dcluomax/coop`) so `cargo binstall` resolves the correct release URLs.
 - **Open-core split.** `coopd-market` has been moved out of the OSS workspace
   into a separate proprietary repo (`coop-market`). The OSS daemon now ships
   with 7 crates instead of 8; the cross-Coop market layer is enabled via the

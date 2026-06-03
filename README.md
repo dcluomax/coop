@@ -47,6 +47,7 @@ One static binary: no Python, no Docker required.
 ```bash
 # 1. install coopd + coop
 curl -fsSL https://raw.githubusercontent.com/dcluomax/coop/main/scripts/install.sh | sh
+# …or, with a Rust toolchain:  cargo binstall coop-cli   (prebuilt, no compile)
 
 # 2. start the daemon
 coopd serve &
@@ -69,6 +70,7 @@ in `target/release/`.
 | 🐳 **Docker** | `docker compose up -d` ([compose](./docker-compose.yml)) |
 | 🛠️ **systemd** | `contrib/systemd/coopd.service` (24/7 bare metal) |
 | 📥 **Binaries** | [latest release](https://github.com/dcluomax/coop/releases/latest) — 7 platforms, SHA-256 checksums |
+| 📦 **cargo-binstall** | `cargo binstall coop-cli` — fetches the prebuilt release binary for your platform |
 
 Full guide, including LAN/public exposure and the **required** `COOP_API_TOKEN`
 + `COOP_PUBLIC` settings → **[docs/deployment.md](./docs/deployment.md)**.
