@@ -48,3 +48,25 @@ if-addrs = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
+
+# cargo-deb: `cargo deb -p coopd --target <triple> --no-build` packages the
+# daemon + CLI into a .deb with the hardened systemd unit. See
+# .github/workflows/release.yml (the `debian` job) and docs/deployment.md.
+[package.metadata.deb]
+name = "coop"
+maintainer = "The Coop Authors <noreply@github.com>"
+copyright = "The Coop Authors"
+license-file = ["../../LICENSE-APACHE", "0"]
+extended-description = "Coop is a self-hosted AI agent farm OS. The coopd daemon runs AI agents as sandboxed 'hens'; the coop CLI manages the farm."
+section = "utils"
+priority = "optional"
+depends = "$auto, bubblewrap, tmux"
+assets = [
+    ["target/release/coopd", "usr/bin/coopd", "755"],
+    ["target/release/coop", "usr/bin/coop", "755"],
+    ["../../contrib/coop.env.example", "etc/coop/coop.env.example", "644"],
+    ["../../README.md", "usr/share/doc/coop/README.md", "644"],
+    ["../../CHANGELOG.md", "usr/share/doc/coop/CHANGELOG.md", "644"],
+]
+maintainer-scripts = "../../contrib/debian/"
+systemd-units = { unit-scripts = "../../contrib/systemd", enable = true, start = false }

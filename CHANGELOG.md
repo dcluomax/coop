@@ -63,6 +63,14 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
 
 ### Added
 
+- **Debian packages + Homebrew formula (packaging phase-2).** Releases now ship
+  `.deb` packages for `amd64`, `arm64`, and `armhf` (built via `cargo-deb`; they
+  install the `coopd`/`coop` binaries plus the hardened systemd unit and depend
+  on `bubblewrap`/`tmux`), and a generated Homebrew formula
+  (`packaging/homebrew/coop.rb`) published to the `dcluomax/homebrew-coop` tap:
+  `brew install dcluomax/coop/coop`. See
+  [docs/deployment.md](./docs/deployment.md#install).
+
 - **Azure Key Vault BYOK backend.** A Hen's `brain.provider_id` may now use the
   `azure-kv://<vault>/<secret>[/<version>]` scheme to fetch its model API key
   from Azure Key Vault at run time instead of the local sealed vault.
