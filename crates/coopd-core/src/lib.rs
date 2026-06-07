@@ -23,6 +23,7 @@ pub mod job;
 pub mod manifest;
 pub mod net;
 pub mod orchestrator;
+pub mod remote;
 pub mod task;
 pub mod tool;
 
@@ -34,5 +35,9 @@ pub use job::{Job, JobStatus};
 pub use manifest::{AgentKind, AgentManifest};
 pub use net::{NetAllow, NetPolicy, NetworkSpec, ResolvedNetPolicy};
 pub use orchestrator::{OrchCmd, OrchEvent};
+pub use remote::{
+    FarmEvent, HenSummary, LoopbackBridge, PermissionKind, RemoteBridge, RemoteCommand, RemoteMode,
+    RemoteSpec, SessionMode,
+};
 pub use task::{Task, TaskStatus};
 pub use tool::{CoopTool, ToolCapability, ToolCtx, ToolSchema};

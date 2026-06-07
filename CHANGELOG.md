@@ -63,6 +63,15 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
 
 ### Added
 
+- **Farmhand remote-control seam (L2 Federation, phase-0).** New
+  `coopd_core::remote` module lays the foundation for monitoring and steering
+  the flock from another device: a three-tier `RemoteMode` (`off`/`view`/
+  `control`), an outbound `RemoteBridge` trait, a secret-free `FarmEvent` /
+  `RemoteCommand` schema, and an in-process `LoopbackBridge` reference
+  implementation. The bridge is a deliberately fail-*open* side channel — a
+  dead relay never blocks local execution. Design + roadmap in
+  [docs/design/remote-farmhand.md](./docs/design/remote-farmhand.md).
+
 - **Debian packages + Homebrew formula (packaging phase-2).** Releases now ship
   `.deb` packages for `amd64`, `arm64`, and `armhf` (built via `cargo-deb`; they
   install the `coopd`/`coop` binaries plus the hardened systemd unit and depend
