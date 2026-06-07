@@ -123,6 +123,7 @@ login`, inspect generated files, or troubleshoot a stuck job.
 | [Deployment](./docs/deployment.md) | Docker · Compose · systemd · LAN/public |
 | [Configuration](./docs/configuration.md) | Every environment variable |
 | [Network isolation](./docs/net-isolation.md) | Per-hen sandbox + egress policy (`off`/`allowlist`/`open`) |
+| [Farmhand (design)](./docs/design/remote-farmhand.md) | Remote monitor & steer the flock from another device (roadmap) |
 | [Discord connector](./docs/discord.md) | One channel per chicken |
 | [Decisions](./DECISIONS.md) · [Launch](./LAUNCH.md) · [Changelog](./CHANGELOG.md) | Roadmap & rationale |
 | [Security](./SECURITY.md) | Threat model & private advisory flow |
