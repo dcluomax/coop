@@ -81,19 +81,39 @@ wait_http() {
   done
   return 1
 }
+# NOTE: wait_http is retained as a generic helper; start_coopd intentionally
+# uses its own liveness-aware loop (see below).
 
 start_coopd() {
   : > "$LOG"
-  ( cd "$ROOT" && \
-    COOP_VAULT="" COOP_PASSPHRASE="" \
-    ./target/debug/coopd --data-dir "$DATA_DIR" --log info \
-      serve --addr "127.0.0.1:${PORT}" >> "$LOG" 2>&1 ) &
-  COOPD_PID=$!
-  if ! wait_http "$API/api/v1/farm"; then
-    r "coopd failed to start; tail -50 $LOG:"
-    tail -50 "$LOG" >&2
+  # Fail fast if something is already serving on our port (e.g. a stale coopd
+  # left over from an interrupted run). Without this guard, our own coopd
+  # fails to bind, we'd silently connect to the *other* server, and the
+  # suite reports confusing mismatches (e.g. "expected 0 hens, got 2").
+  if curl -fsS "$API/api/v1/farm" >/dev/null 2>&1; then
+    r "port ${PORT} is already serving an HTTP API before coopd started — a stale coopd? Kill it, or set COOP_E2E_PORT to a free port."
     return 1
   fi
+  ( cd "$ROOT" && \
+    exec env COOP_VAULT="" COOP_PASSPHRASE="" \
+      ./target/debug/coopd --data-dir "$DATA_DIR" --log info \
+      serve --addr "127.0.0.1:${PORT}" >> "$LOG" 2>&1 ) &
+  COOPD_PID=$!
+  # Wait for *our* coopd, bailing out immediately if the process we launched
+  # dies during startup (e.g. a bind failure) instead of waiting on a server
+  # that will never be ours.
+  for _ in $(seq 1 80); do
+    if ! kill -0 "$COOPD_PID" 2>/dev/null; then
+      r "coopd (pid ${COOPD_PID}) exited during startup; tail -50 $LOG:"
+      tail -50 "$LOG" >&2
+      return 1
+    fi
+    curl -fsS "$API/api/v1/farm" >/dev/null 2>&1 && return 0
+    sleep 0.25
+  done
+  r "coopd failed to start; tail -50 $LOG:"
+  tail -50 "$LOG" >&2
+  return 1
 }
 
 stop_coopd_graceful() {
