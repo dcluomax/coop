@@ -16,6 +16,8 @@
 **[Docs](#-docs)** ·
 **[Contribute](./CONTRIBUTING.md)**
 
+![Coop — 30-second CLI quickstart: seal a vault, hatch a hen, see your farm](docs/demo/coop-demo.gif)
+
 ![Coop Farm UI — flock view](docs/screenshots/01-farm-overview.png)
 
 </div>
