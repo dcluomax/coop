@@ -6,6 +6,8 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.2] - 2026-06-11
+
 ### Security
 
 - **C1** — `file_read`/`file_write` now confine all paths to the hen's
