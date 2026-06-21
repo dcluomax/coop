@@ -125,6 +125,19 @@ enum HenCmd {
         /// Hen ID.
         id: String,
     },
+    /// Show a hen's recent episodic memories (oldest first).
+    Memory {
+        /// Hen ID.
+        id: String,
+        /// Max number of most-recent episodes to show.
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Forget (delete) all of a hen's episodic memories.
+    Forget {
+        /// Hen ID.
+        id: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -265,6 +278,28 @@ async fn hen_cmd(api: &str, token: &str, cmd: HenCmd) -> Result<()> {
             .send()
             .await?;
             println!("status: {}", resp.status());
+        }
+        HenCmd::Memory { id, limit } => {
+            let url = match limit {
+                Some(n) => format!("{api}/api/v1/hens/{}/memory?limit={n}", enc(&id)),
+                None => format!("{api}/api/v1/hens/{}/memory", enc(&id)),
+            };
+            let v: Value = auth(client.get(&url), token).send().await?.json().await?;
+            println!("{}", serde_json::to_string_pretty(&v)?);
+        }
+        HenCmd::Forget { id } => {
+            let resp = auth(
+                client.delete(format!("{api}/api/v1/hens/{}/memory", enc(&id))),
+                token,
+            )
+            .send()
+            .await?;
+            let status = resp.status();
+            let body: Value = resp.json().await.unwrap_or_else(|_| serde_json::json!({}));
+            if !status.is_success() {
+                bail!("forget failed ({status}): {body}");
+            }
+            println!("{}", serde_json::to_string_pretty(&body)?);
         }
     }
     Ok(())

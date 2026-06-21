@@ -7,7 +7,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use coopd_core::{AgentKind, AgentManifest, Hen, HenId, HenState, Job, Task};
+use coopd_core::{AgentKind, AgentManifest, Hen, HenId, HenState, Job, MemoryEntry, Task};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
@@ -79,6 +79,10 @@ pub fn router(
         .route("/api/v1/hens/:id/sleep", post(sleep_hen))
         .route("/api/v1/hens/:id/wake", post(wake_hen))
         .route("/api/v1/hens/:id/jobs", post(submit_job))
+        .route(
+            "/api/v1/hens/:id/memory",
+            get(get_hen_memory).delete(forget_hen_memory),
+        )
         .route("/api/v1/hens/:id/shell/send", post(shell_send))
         .route("/api/v1/jobs", get(list_jobs))
         .route("/api/v1/jobs/:id", get(get_job))
@@ -344,6 +348,34 @@ async fn get_job(
     Path(id): Path<String>,
 ) -> Result<Json<Job>, AppError> {
     Ok(Json(orch.get_job(id).await?))
+}
+
+#[derive(Deserialize)]
+struct MemoryQ {
+    limit: Option<usize>,
+}
+
+async fn get_hen_memory(
+    State(orch): State<OrchHandle>,
+    Path(id): Path<String>,
+    Query(q): Query<MemoryQ>,
+) -> Result<Json<Vec<MemoryEntry>>, AppError> {
+    let id = HenId::parse(&id).map_err(|e| AppError::bad_request(e.to_string()))?;
+    Ok(Json(orch.load_memories(id, q.limit).await?))
+}
+
+#[derive(Serialize)]
+struct ForgetResult {
+    forgotten: usize,
+}
+
+async fn forget_hen_memory(
+    State(orch): State<OrchHandle>,
+    Path(id): Path<String>,
+) -> Result<Json<ForgetResult>, AppError> {
+    let id = HenId::parse(&id).map_err(|e| AppError::bad_request(e.to_string()))?;
+    let forgotten = orch.forget_memories(id).await?;
+    Ok(Json(ForgetResult { forgotten }))
 }
 
 #[derive(Deserialize)]

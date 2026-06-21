@@ -6,6 +6,25 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
 
 ## [Unreleased]
 
+### Added
+
+- **Persistent Hen memory** — Hens now remember. Each completed job (success
+  or failure) is recorded as a compact *episode* (prompt, short outcome, turn
+  count, status), and the most recent episodes are replayed into the hen's
+  system prompt on the next job — so a hen continues from context instead of
+  starting from zero every time. Governed by the existing `memory:` manifest
+  block:
+  - `episodic_retention_days` — prune episodes older than N days (enforced).
+  - `inherit_from` — a new hen copies a parent hen's episodes at creation and
+    records lineage (`parent`/`generation`).
+  - Inject count is capped (default 8, override `COOP_MEMORY_CONTEXT_ENTRIES`,
+    `0` disables injection).
+  - New: `GET`/`DELETE /api/v1/hens/:id/memory` and `coop hen memory <id>
+    [--limit N]` / `coop hen forget <id>`. Deleting a hen purges its memory.
+  - Audit: orchestrator emits a `memory_recorded` event per episode.
+  - `semantic_summarize_every` remains reserved (LLM-summarized memory is a
+    future phase). See `docs/memory.md`.
+
 ## [0.1.0-alpha.2] - 2026-06-11
 
 ### Security

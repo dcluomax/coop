@@ -270,10 +270,27 @@ b "[8] hen state restored to IDLE"
 state=$(j_get "$(curl -fsS "$API/api/v1/hens/local.coop%2Faria")" state)
 [[ "$state" == "IDLE" ]] && g "hen IDLE post-job" || { r "expected IDLE got $state"; exit 1; }
 
+# 8b. persistent memory recorded
+b "[8b] persistent memory"
+mem=$(curl -fsS "$API/api/v1/hens/local.coop%2Faria/memory")
+mem_len=$("$PY" -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$mem")
+[[ "$mem_len" -ge 1 ]] && g "recorded $mem_len episode(s)" || { r "no memory recorded: $mem"; exit 1; }
+last=$(( mem_len - 1 ))
+mem_outcome=$(j_get "$mem" "${last}.outcome")
+mem_job=$(j_get "$mem" "${last}.job_id")
+case "$MODE" in
+  mock) [[ "$mem_outcome" == "failed" ]] && g "episode outcome=failed (mock)" || { r "expected failed, got $mem_outcome"; exit 1; } ;;
+  live) [[ "$mem_outcome" == "done"   ]] && g "episode outcome=done (live)"   || { r "expected done, got $mem_outcome"; exit 1; } ;;
+esac
+[[ "$mem_job" == "$job_id" ]] && g "episode linked to job $job_id" || { r "episode job_id mismatch: $mem_job"; exit 1; }
+mem1=$(curl -fsS "$API/api/v1/hens/local.coop%2Faria/memory?limit=1")
+mem1_len=$("$PY" -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$mem1")
+[[ "$mem1_len" == "1" ]] && g "?limit=1 returns 1 episode" || { r "limit failed: got $mem1_len"; exit 1; }
+
 # 6b. WSS event check
 b "[6b] WSS event check"
 sleep 0.5
-for evt in hen_created hen_state_changed job_submitted job_status_changed; do
+for evt in hen_created hen_state_changed job_submitted job_status_changed memory_recorded; do
   if grep -q "\"type\":\"$evt\"" "$WSS_LOG"; then
     g "saw $evt"
   else
@@ -287,6 +304,16 @@ done
 b "[10] CLI parity"
 lst=$("$ROOT/target/debug/coop" --api "$API" job list)
 echo "$lst" | grep -q "$job_id" && g "coop job list shows $job_id" || { r "job missing"; echo "$lst" >&2; exit 1; }
+
+# 10b. CLI memory + forget
+b "[10b] CLI memory + forget"
+cli_mem=$("$ROOT/target/debug/coop" --api "$API" hen memory local.coop/aria)
+echo "$cli_mem" | grep -q "$job_id" && g "coop hen memory shows episode" || { r "memory missing job"; echo "$cli_mem" >&2; exit 1; }
+cli_forget=$("$ROOT/target/debug/coop" --api "$API" hen forget local.coop/aria)
+echo "$cli_forget" | grep -q '"forgotten"' && g "coop hen forget reports count" || { r "forget output unexpected"; echo "$cli_forget" >&2; exit 1; }
+mem_after=$(curl -fsS "$API/api/v1/hens/local.coop%2Faria/memory")
+mem_after_len=$("$PY" -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$mem_after")
+[[ "$mem_after_len" == "0" ]] && g "memory empty after forget" || { r "expected 0 after forget, got $mem_after_len"; exit 1; }
 
 # 12. PTY shell over WSS  (run before kill-9 step)
 b "[12] PTY shell over WSS"
