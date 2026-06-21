@@ -7,7 +7,9 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use coopd_core::{AgentKind, AgentManifest, Hen, HenId, HenState, Job, MemoryEntry, Task};
+use coopd_core::{
+    AgentKind, AgentManifest, Delegator, Hen, HenId, HenState, Job, MemoryEntry, Task,
+};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
@@ -79,6 +81,7 @@ pub fn router(
         .route("/api/v1/hens/:id/sleep", post(sleep_hen))
         .route("/api/v1/hens/:id/wake", post(wake_hen))
         .route("/api/v1/hens/:id/jobs", post(submit_job))
+        .route("/api/v1/hens/:id/delegate", post(delegate_hen))
         .route(
             "/api/v1/hens/:id/memory",
             get(get_hen_memory).delete(forget_hen_memory),
@@ -302,6 +305,60 @@ async fn submit_job(
         StatusCode::ACCEPTED,
         Json(serde_json::json!({ "job_id": job_id })),
     ))
+}
+
+#[derive(Deserialize)]
+struct DelegateBody {
+    to: String,
+    prompt: String,
+}
+
+async fn delegate_hen(
+    State(orch): State<OrchHandle>,
+    Path(id): Path<String>,
+    Json(body): Json<DelegateBody>,
+) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
+    let from = HenId::parse(&id).map_err(|e| AppError::bad_request(e.to_string()))?;
+    let to = HenId::parse(&body.to).map_err(|e| AppError::bad_request(e.to_string()))?;
+    check_prompt_len(&body.prompt)?;
+    if body.prompt.trim().is_empty() {
+        return Err(AppError::bad_request("prompt is empty"));
+    }
+    // Pre-validate for a clean 400 (self-delegation / depth). The orchestrator
+    // re-validates authoritatively. A top-level delegation runs at depth 1.
+    coopd_core::validate_delegation(&from, &to, 1)
+        .map_err(|e| AppError::bad_request(e.to_string()))?;
+    let outcome = Delegator::delegate(
+        &orch,
+        coopd_core::DelegationRequest {
+            from,
+            to: to.clone(),
+            prompt: body.prompt,
+            parent_depth: 0,
+            timeout: delegate_api_timeout(),
+        },
+    )
+    .await?;
+    Ok((
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "hen": to.to_string(),
+            "job_id": outcome.job_id,
+            "status": format!("{:?}", outcome.status),
+            "output": outcome.output,
+        })),
+    ))
+}
+
+/// Effective wait for an API-initiated delegation, from
+/// `COOP_DELEGATE_TIMEOUT_SECS` (default 180s).
+fn delegate_api_timeout() -> std::time::Duration {
+    let secs = std::env::var("COOP_DELEGATE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|s| *s > 0)
+        .unwrap_or(180);
+    std::time::Duration::from_secs(secs)
 }
 
 /// Returns `Err(reason)` if `prompt` violates the active lease policy.

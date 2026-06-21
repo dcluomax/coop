@@ -110,6 +110,20 @@ pub enum OrchCmd {
         /// Reply channel returning the number of episodes deleted.
         reply: oneshot::Sender<Result<usize>>,
     },
+    /// Delegate a subtask from one Hen to another (creates a sub-job on the
+    /// target and replies with its job ID; the caller polls for the result).
+    Delegate {
+        /// Delegating ("manager") Hen.
+        from: HenId,
+        /// Target Hen that will perform the subtask.
+        to: HenId,
+        /// Subtask prompt.
+        prompt: String,
+        /// Delegation depth of the calling job (sub-job runs at `+1`).
+        parent_depth: u32,
+        /// Reply channel returning the created sub-job ID.
+        reply: oneshot::Sender<Result<String>>,
+    },
     /// Try to pick up the next Queued job for a Hen (used by runner after a
     /// job completes; the orchestrator inspects state and spawns the next
     /// runner if the hen is Idle and a Queued job exists).
@@ -166,6 +180,15 @@ pub enum OrchEvent {
         hen_id: HenId,
         /// Episode identifier.
         entry_id: String,
+    },
+    /// One Hen delegated a subtask to another (audit/legibility).
+    Delegated {
+        /// Delegating ("manager") Hen.
+        from: HenId,
+        /// Target Hen performing the subtask.
+        to: HenId,
+        /// The created sub-job.
+        job_id: String,
     },
     /// Orchestrator is shutting down.
     ShuttingDown,

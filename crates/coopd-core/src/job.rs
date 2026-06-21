@@ -42,6 +42,10 @@ pub struct Job {
     /// Number of reason/tool turns consumed.
     #[serde(default)]
     pub turns: u32,
+    /// Delegation depth: 0 for a farmer-submitted job, +1 per delegation hop.
+    /// Bounds delegation recursion (see `coopd_core::delegation`).
+    #[serde(default)]
+    pub delegation_depth: u32,
     /// Total Grain cost.
     #[serde(default)]
     pub grain_spent: u64,
@@ -65,10 +69,19 @@ impl Job {
             result: None,
             error: None,
             turns: 0,
+            delegation_depth: 0,
             grain_spent: 0,
             created_at: now,
             updated_at: now,
         }
+    }
+
+    /// Set the delegation depth (builder-style). Used by the orchestrator when
+    /// a job is created via delegation.
+    #[must_use]
+    pub fn at_depth(mut self, depth: u32) -> Self {
+        self.delegation_depth = depth;
+        self
     }
 
     /// Mark the job as running.

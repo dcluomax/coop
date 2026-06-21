@@ -8,6 +8,22 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
 
 ### Added
 
+- **In-farm delegation** — a Hen granted the new `delegate` tool becomes a
+  *manager* that can hand a subtask to another Hen on the same farm and wait
+  for its result. The sub-job runs as an ordinary job on the **target** Hen
+  (its own sandbox, network policy, and memory all apply). This is the
+  "organization" tier primitive — the OSS, single-farm counterpart to
+  cross-farm leasing.
+  - Opt-in for autonomous use (manifest `tools: [delegate]`); farmer-initiated
+    delegation via API/CLI is always available.
+  - Governed: self-delegation rejected (`400`), depth-capped at
+    `MAX_DELEGATION_DEPTH` (3) with the hop count carried on each job (also
+    breaks cycles), and a `delegated` audit event per dispatch.
+  - The orchestrator never blocks: it validates + enqueues + returns the
+    sub-job id; the caller polls for the result (timeout
+    `COOP_DELEGATE_TIMEOUT_SECS`, default 180s).
+  - New: `POST /api/v1/hens/:id/delegate` and `coop hen delegate <from> <to>
+    <prompt>`. See `docs/delegation.md` and `examples/manager.yaml`.
 - **Persistent Hen memory** — Hens now remember. Each completed job (success
   or failure) is recorded as a compact *episode* (prompt, short outcome, turn
   count, status), and the most recent episodes are replayed into the hen's

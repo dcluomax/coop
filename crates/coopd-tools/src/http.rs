@@ -215,6 +215,8 @@ mod tests {
             workdir: std::env::temp_dir(),
             net_policy: p,
             deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
+            delegation_depth: 0,
+            delegator: None,
         }
     }
 

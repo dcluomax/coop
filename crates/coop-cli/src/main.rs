@@ -138,6 +138,15 @@ enum HenCmd {
         /// Hen ID.
         id: String,
     },
+    /// Delegate a subtask from one hen to another and print the result.
+    Delegate {
+        /// Delegating ("manager") hen ID, e.g. `local.coop/aria`.
+        from: String,
+        /// Target hen ID that performs the subtask, e.g. `local.coop/scout`.
+        to: String,
+        /// The subtask prompt.
+        prompt: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -298,6 +307,21 @@ async fn hen_cmd(api: &str, token: &str, cmd: HenCmd) -> Result<()> {
             let body: Value = resp.json().await.unwrap_or_else(|_| serde_json::json!({}));
             if !status.is_success() {
                 bail!("forget failed ({status}): {body}");
+            }
+            println!("{}", serde_json::to_string_pretty(&body)?);
+        }
+        HenCmd::Delegate { from, to, prompt } => {
+            let resp = auth(
+                client.post(format!("{api}/api/v1/hens/{}/delegate", enc(&from))),
+                token,
+            )
+            .json(&serde_json::json!({ "to": to, "prompt": prompt }))
+            .send()
+            .await?;
+            let status = resp.status();
+            let body: Value = resp.json().await.unwrap_or_else(|_| serde_json::json!({}));
+            if !status.is_success() {
+                bail!("delegate failed ({status}): {body}");
             }
             println!("{}", serde_json::to_string_pretty(&body)?);
         }
