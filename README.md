@@ -39,6 +39,7 @@ One static binary: no Python, no Docker required.
 | 🔐 **BYOK vault** | Sealed `xchacha20poly1305` vault for your model keys, or pull them from **Azure Key Vault**. Locked at rest. |
 | 🤖 **Real autonomy** | Hens get a sandboxed PTY shell, a tool ABI, and a pluggable brain — **Anthropic**, **OpenAI**, or any OpenAI-compatible server (Ollama, vLLM, OpenRouter…). |
 | 🧠 **Persistent memory** | Hens remember. Each job becomes a compact *episode* replayed into the next run, with retention + inheritance — so a hen continues from context, not from zero. |
+| 🐝 **In-farm delegation** | Give a hen the `delegate` tool and it becomes a *manager*: it hands subtasks to specialist hens on the same farm and collects the results. Opt-in, depth-capped, audited — the flock becomes an org chart. |
 | 🧱 **Per-hen isolation** | Each hen runs in its own OS sandbox (macOS Seatbelt / Linux Bubblewrap) — confined to its workdir, scrubbed env, siblings unreadable. |
 | 🌐 **Network egress policy** | Per-hen `network:` block — `off` / `allowlist` / `open`. Fail-closed: a hen that can't enforce its policy refuses to hatch. |
 | 🖥️ **Live shell** | Click any hen in the Farm UI to drop into a real terminal in its workdir. |
@@ -126,6 +127,8 @@ login`, inspect generated files, or troubleshoot a stuck job.
 | [Deployment](./docs/deployment.md) | Docker · Compose · systemd · LAN/public |
 | [Configuration](./docs/configuration.md) | Every environment variable |
 | [Network isolation](./docs/net-isolation.md) | Per-hen sandbox + egress policy (`off`/`allowlist`/`open`) |
+| [Memory](./docs/memory.md) | Persistent episodic Hen memory (record · replay · retention · inheritance) |
+| [Delegation](./docs/delegation.md) | In-farm Hen-to-Hen delegation (the `delegate` tool) |
 | [Farmhand (design)](./docs/design/remote-farmhand.md) | Remote monitor & steer the flock from another device (roadmap) |
 | [Discord connector](./docs/discord.md) | One channel per chicken |
 | [Decisions](./DECISIONS.md) · [Launch](./LAUNCH.md) · [Changelog](./CHANGELOG.md) | Roadmap & rationale |

@@ -315,6 +315,33 @@ mem_after=$(curl -fsS "$API/api/v1/hens/local.coop%2Faria/memory")
 mem_after_len=$("$PY" -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$mem_after")
 [[ "$mem_after_len" == "0" ]] && g "memory empty after forget" || { r "expected 0 after forget, got $mem_after_len"; exit 1; }
 
+# 10c. in-farm delegation (manager hen dispatches to a worker hen)
+b "[10c] in-farm delegation"
+scout_yaml=$'spec_version: coop/v1\nname: scout\nbrain:\n  provider_id: vault:byok-anthropic\n  model: claude-sonnet-4-5-20250929\ntools: [bash, file_read]\n'
+curl -fsS -X POST "$API/api/v1/hens" -H 'content-type: application/yaml' --data-binary "$scout_yaml" >/dev/null
+curl -fsS -X POST "$API/api/v1/hens/local.coop%2Fscout/hatch" >/dev/null
+del_resp=$(curl -fsS --max-time 90 -X POST "$API/api/v1/hens/local.coop%2Faria/delegate" \
+  -H 'content-type: application/json' \
+  -d '{"to":"local.coop/scout","prompt":"recon subtask from e2e"}')
+del_job=$(j_get "$del_resp" job_id)
+del_status=$(j_get "$del_resp" status)
+[[ -n "$del_job" ]] && g "delegation produced sub-job $del_job" || { r "no sub-job: $del_resp"; exit 1; }
+case "$MODE" in
+  mock) [[ "$del_status" == "Failed" ]] && g "sub-job FAILED in mock (no key)" || { r "expected Failed, got $del_status"; exit 1; } ;;
+  live) [[ "$del_status" == "Done"   ]] && g "sub-job DONE (live)"            || { r "expected Done, got $del_status"; exit 1; } ;;
+esac
+# the sub-job must be owned by the worker hen, not the manager
+scout_jobs=$(curl -fsS "$API/api/v1/jobs?hen_id=local.coop%2Fscout")
+echo "$scout_jobs" | grep -q "$del_job" && g "sub-job owned by worker scout" || { r "sub-job not owned by scout"; echo "$scout_jobs" >&2; exit 1; }
+# self-delegation must be rejected with HTTP 400
+self_code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$API/api/v1/hens/local.coop%2Faria/delegate" \
+  -H 'content-type: application/json' \
+  -d '{"to":"local.coop/aria","prompt":"loop"}')
+[[ "$self_code" == "400" ]] && g "self-delegation rejected (400)" || { r "expected 400, got $self_code"; exit 1; }
+# the orchestrator must have emitted a `delegated` audit event
+sleep 0.5
+grep -q '"type":"delegated"' "$WSS_LOG" && g "saw delegated event" || { r "missing delegated in WSS log"; cat "$WSS_LOG" >&2; exit 1; }
+
 # 12. PTY shell over WSS  (run before kill-9 step)
 b "[12] PTY shell over WSS"
 shell_log="/tmp/coopd-e2e-shell.log"

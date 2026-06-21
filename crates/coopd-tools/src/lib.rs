@@ -14,6 +14,7 @@ use std::sync::Arc;
 use coopd_core::{CoopTool, ToolCapability};
 
 pub mod bash;
+pub mod delegate;
 pub mod file_read;
 pub mod file_write;
 pub mod http;
@@ -50,6 +51,7 @@ impl Registry {
         r.register(Arc::new(file_read::FileRead));
         r.register(Arc::new(file_write::FileWrite));
         r.register(Arc::new(http::Http::new()));
+        r.register(Arc::new(delegate::Delegate));
         r
     }
 
@@ -107,5 +109,7 @@ pub(crate) fn test_ctx(workdir: std::path::PathBuf) -> coopd_core::ToolCtx {
         workdir,
         net_policy: coopd_core::ResolvedNetPolicy::default(),
         deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
+        delegation_depth: 0,
+        delegator: None,
     }
 }

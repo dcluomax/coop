@@ -208,7 +208,7 @@ async fn reason_loop(
                 ContentBlock::Thinking { .. } | ContentBlock::ToolResult { .. } => {}
                 ContentBlock::ToolCall { id, name, input } => {
                     let (result, is_error) =
-                        invoke_tool(tools, workdir, hen, job, &name, input.clone()).await;
+                        invoke_tool(orch, tools, workdir, hen, job, &name, input.clone()).await;
                     assistant_blocks.push(ContentBlock::ToolCall {
                         id: id.clone(),
                         name,
@@ -243,6 +243,7 @@ async fn reason_loop(
 }
 
 async fn invoke_tool(
+    orch: &OrchHandle,
     tools: &Registry,
     workdir: &std::path::Path,
     hen: &Hen,
@@ -284,6 +285,10 @@ async fn invoke_tool(
         workdir: workdir.to_path_buf(),
         net_policy: coopd_core::ResolvedNetPolicy::from_spec(hen.manifest.network.as_ref()),
         deadline: Instant::now() + Duration::from_secs(120),
+        delegation_depth: job.delegation_depth,
+        delegator: Some(
+            std::sync::Arc::new(orch.clone()) as std::sync::Arc<dyn coopd_core::Delegator>
+        ),
     };
     debug!(tool = name, %job.id, "invoking tool");
     match tool.invoke(&ctx, input).await {

@@ -3,8 +3,9 @@
 use std::sync::Arc;
 
 use coopd_core::{
-    AgentManifest, CoopId, CoreError, Hen, HenId, HenState, Job, MemoryEntry, OrchCmd, OrchEvent,
-    Result as CoreResult,
+    AgentManifest, CoopId, CoreError, DelegationOutcome, DelegationRequest, Delegator, Hen, HenId,
+    HenState, Job, JobStatus, MemoryEntry, OrchCmd, OrchEvent, Result as CoreResult,
+    validate_delegation,
 };
 use coopd_storage::Store;
 use coopd_tools::Registry;
@@ -179,6 +180,62 @@ impl OrchHandle {
     }
 }
 
+/// Terminal poll interval while waiting on a delegated sub-job.
+const DELEGATE_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+#[async_trait::async_trait]
+impl Delegator for OrchHandle {
+    async fn delegate(&self, req: DelegationRequest) -> CoreResult<DelegationOutcome> {
+        let to = req.to.clone();
+        let timeout = req.timeout;
+        // 1) Ask the orchestrator to create the sub-job (non-blocking: it just
+        //    validates, enqueues and spawns, then returns the new job id).
+        let (tx, rx) = oneshot::channel();
+        self.send(OrchCmd::Delegate {
+            from: req.from,
+            to: req.to,
+            prompt: req.prompt,
+            parent_depth: req.parent_depth,
+            reply: tx,
+        })
+        .await?;
+        let job_id = rx
+            .await
+            .map_err(|_| CoreError::Other("orchestrator dropped reply".into()))??;
+
+        // 2) Poll for completion client-side so the orchestrator loop stays free
+        //    to process the worker's job updates (no self-deadlock).
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let job = self.get_job(job_id.clone()).await?;
+            match job.status {
+                JobStatus::Done | JobStatus::Failed | JobStatus::Cancelled => {
+                    let output = match job.status {
+                        JobStatus::Done => job.result.unwrap_or_default(),
+                        JobStatus::Failed => job.error.unwrap_or_default(),
+                        _ => "cancelled".to_string(),
+                    };
+                    return Ok(DelegationOutcome {
+                        job_id,
+                        status: job.status,
+                        output,
+                        depth: job.delegation_depth,
+                    });
+                }
+                _ => {}
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(CoreError::Other(format!(
+                    "delegation to {to} timed out after {}s (job {job_id} still {:?})",
+                    timeout.as_secs(),
+                    job.status
+                )));
+            }
+            tokio::time::sleep(DELEGATE_POLL_INTERVAL).await;
+        }
+    }
+}
+
 /// Spawn the orchestrator task. Returns a clonable handle.
 pub fn spawn(
     store: Store,
@@ -329,6 +386,27 @@ async fn run(
                 let res = handle_dispatch_next(
                     &store,
                     &hen_id,
+                    &events,
+                    &self_handle,
+                    &tools,
+                    &brain_factory,
+                    &workdir_base,
+                );
+                let _ = reply.send(res);
+            }
+            OrchCmd::Delegate {
+                from,
+                to,
+                prompt,
+                parent_depth,
+                reply,
+            } => {
+                let res = handle_delegate(
+                    &store,
+                    from,
+                    to,
+                    prompt,
+                    parent_depth,
                     &events,
                     &self_handle,
                     &tools,
@@ -520,6 +598,34 @@ fn handle_submit(
     brain_factory: &Arc<Mutex<BrainFactory>>,
     workdir_base: &std::path::Path,
 ) -> CoreResult<String> {
+    enqueue_job(
+        store,
+        hen_id,
+        prompt,
+        0,
+        events,
+        handle,
+        tools,
+        brain_factory,
+        workdir_base,
+    )
+}
+
+/// Rehydrate `hen_id` if needed, persist a Queued job at `depth`, emit
+/// `JobSubmitted`, and spawn the runner immediately if the hen is Idle.
+/// Shared by farmer submission (depth 0) and delegation (depth +1).
+#[allow(clippy::too_many_arguments)]
+fn enqueue_job(
+    store: &Store,
+    hen_id: HenId,
+    prompt: String,
+    depth: u32,
+    events: &broadcast::Sender<OrchEvent>,
+    handle: &OrchHandle,
+    tools: &Arc<Registry>,
+    brain_factory: &Arc<Mutex<BrainFactory>>,
+    workdir_base: &std::path::Path,
+) -> CoreResult<String> {
     let hen = store.get_hen(&hen_id).map_err(map_storage_err)?;
     // Auto-rehydrate hens on job submission.
     // Dormant/Sleeping -> Idle (single hop). Defined -> Hatching -> Idle (two hops).
@@ -538,7 +644,7 @@ fn handle_submit(
     // Persist the job as Queued regardless of state — the runner drains the
     // per-hen queue on completion, so callers can stream prompts even while
     // the hen is Working/Hatching/Leased.
-    let job = Job::new(hen_id.clone(), prompt);
+    let job = Job::new(hen_id.clone(), prompt).at_depth(depth);
     store.put_job(&job).map_err(map_storage_err)?;
     let _ = events.send(OrchEvent::JobSubmitted {
         job_id: job.id.clone(),
@@ -554,6 +660,45 @@ fn handle_submit(
             job,
         );
     }
+    Ok(job_id)
+}
+
+/// Create a delegated sub-job: validate (self/cycle/depth), confirm the target
+/// exists, enqueue at `parent_depth + 1`, and emit `Delegated`.
+#[allow(clippy::too_many_arguments)]
+fn handle_delegate(
+    store: &Store,
+    from: HenId,
+    to: HenId,
+    prompt: String,
+    parent_depth: u32,
+    events: &broadcast::Sender<OrchEvent>,
+    handle: &OrchHandle,
+    tools: &Arc<Registry>,
+    brain_factory: &Arc<Mutex<BrainFactory>>,
+    workdir_base: &std::path::Path,
+) -> CoreResult<String> {
+    let next_depth = parent_depth + 1;
+    // Authoritative re-validation (the tool/API pre-validate for nicer errors).
+    validate_delegation(&from, &to, next_depth)?;
+    // Confirm the target hen exists before enqueuing.
+    store.get_hen(&to).map_err(map_storage_err)?;
+    let job_id = enqueue_job(
+        store,
+        to.clone(),
+        prompt,
+        next_depth,
+        events,
+        handle,
+        tools,
+        brain_factory,
+        workdir_base,
+    )?;
+    let _ = events.send(OrchEvent::Delegated {
+        from,
+        to,
+        job_id: job_id.clone(),
+    });
     Ok(job_id)
 }
 

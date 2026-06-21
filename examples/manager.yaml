@@ -1,0 +1,28 @@
+# Manager Hen — coordinates specialist hens via in-farm delegation.
+#
+#   coop hen create examples/manager.yaml
+#   coop hen create examples/aria.yaml        # a worker to delegate to
+#   coop hen hatch local.coop/manager
+#   coop hen delegate local.coop/manager local.coop/aria "summarize today's logs"
+#
+# The `delegate` tool is what makes this hen a "manager": it can hand a subtask
+# to another hen on the same farm and wait for the result. Listing `delegate`
+# here lets the hen delegate autonomously (its brain decides); farmer-initiated
+# `coop hen delegate` works against any hen regardless. See docs/delegation.md.
+spec_version: coop/v1
+name: manager
+brain:
+  provider_id: vault:byok-anthropic
+  model: claude-sonnet-4-5-20250929
+# `delegate` needs no fs/net/proc capabilities, so it works even under
+# `network: off`. Add other tools only if the manager also does work itself.
+tools: [delegate]
+
+# A coordinator typically needs no direct egress of its own — it delegates the
+# work that does. Tighten to `off` to make that explicit.
+network:
+  policy: off
+
+# Remember coordination decisions across runs (optional). See docs/memory.md.
+memory:
+  episodic_retention_days: 30

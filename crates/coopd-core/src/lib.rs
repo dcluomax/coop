@@ -16,6 +16,7 @@
 #![warn(missing_docs)]
 
 pub mod brain;
+pub mod delegation;
 pub mod error;
 pub mod hen;
 pub mod ids;
@@ -29,6 +30,9 @@ pub mod task;
 pub mod tool;
 
 pub use brain::{BrainAdapter, BrainCaps, ReasonRequest, ReasonResponse, Tier};
+pub use delegation::{
+    DelegationOutcome, DelegationRequest, Delegator, MAX_DELEGATION_DEPTH, validate_delegation,
+};
 pub use error::{CoreError, Result};
 pub use hen::{Hen, HenState, LeaseStatus};
 pub use ids::{CoopId, HenId, RoostId};

@@ -1,11 +1,13 @@
 //! Tool ABI — the abstraction over agent tools (in-process v1).
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+use crate::delegation::Delegator;
 use crate::error::Result;
 
 /// Capability declared by a tool (the host enforces these).
@@ -66,7 +68,6 @@ pub struct ToolCostEstimate {
 ///
 /// In v0.1 this is a stub; later versions add a coopd socket for cost/log
 /// reporting and a deadline.
-#[derive(Debug)]
 pub struct ToolCtx {
     /// Agent invoking this tool.
     pub agent_id: String,
@@ -80,6 +81,27 @@ pub struct ToolCtx {
     pub net_policy: crate::net::ResolvedNetPolicy,
     /// Deadline (panic-safe).
     pub deadline: Instant,
+    /// Delegation depth of the job this invocation belongs to (0 = farmer
+    /// submitted). The `delegate` tool uses this to enforce depth limits.
+    pub delegation_depth: u32,
+    /// Handle for delegating subtasks to other Hens, when available. `None`
+    /// in contexts without an orchestrator (e.g. unit tests).
+    pub delegator: Option<Arc<dyn Delegator>>,
+}
+
+impl std::fmt::Debug for ToolCtx {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolCtx")
+            .field("agent_id", &self.agent_id)
+            .field("session_id", &self.session_id)
+            .field("lease_id", &self.lease_id)
+            .field("workdir", &self.workdir)
+            .field("net_policy", &self.net_policy)
+            .field("deadline", &self.deadline)
+            .field("delegation_depth", &self.delegation_depth)
+            .field("delegator", &self.delegator.as_ref().map(|_| "<delegator>"))
+            .finish()
+    }
 }
 
 /// Tool ABI (`coop.tools/v1`).
