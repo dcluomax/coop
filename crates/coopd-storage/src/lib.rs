@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use coopd_core::{Hen, HenId, Job};
+use coopd_core::{Hen, HenId, Job, MemoryEntry};
 use redb::{Database, ReadableTable, TableDefinition};
 use thiserror::Error;
 
@@ -60,6 +60,19 @@ type Result<T> = std::result::Result<T, StorageError>;
 
 const HENS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("hens_v1");
 const JOBS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("jobs_v1");
+const MEMORIES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("memories_v1");
+
+/// NUL separator between a Hen id and an episode id in a memory key. Keeps all
+/// of a Hen's episodes in a contiguous, chronologically-ordered key range
+/// (episode ids are UUIDv7).
+const MEM_SEP: char = '\u{0}';
+
+/// Build the lo/hi bounds (inclusive lo, exclusive hi) for a Hen's episode
+/// key range: `"<hen>\0"` ..= `"<hen>\u{1}"`.
+fn mem_range_bounds(hen_id: &HenId) -> (String, String) {
+    let h = hen_id.as_str();
+    (format!("{h}{MEM_SEP}"), format!("{h}\u{1}"))
+}
 
 /// Storage handle (thread-safe, cloneable).
 #[derive(Debug, Clone)]
@@ -91,6 +104,7 @@ impl Store {
         {
             let _ = write.open_table(HENS_TABLE)?;
             let _ = write.open_table(JOBS_TABLE)?;
+            let _ = write.open_table(MEMORIES_TABLE)?;
         }
         write.commit()?;
         Ok(Self { db: Arc::new(db) })
@@ -218,6 +232,111 @@ impl Store {
         }
         Ok(out)
     }
+
+    /// Persist an episodic [`MemoryEntry`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `entry` cannot be JSON-encoded or if the redb
+    /// write transaction fails to commit.
+    pub fn put_memory(&self, entry: &MemoryEntry) -> Result<()> {
+        let key = format!("{}{MEM_SEP}{}", entry.hen_id.as_str(), entry.id);
+        let value = serde_json::to_vec(entry)?;
+        let write = self.db.begin_write()?;
+        {
+            let mut table = write.open_table(MEMORIES_TABLE)?;
+            table.insert(key.as_str(), value.as_slice())?;
+        }
+        write.commit()?;
+        Ok(())
+    }
+
+    /// List a Hen's episodic memories in chronological order (oldest first).
+    /// When `limit` is `Some(n)`, only the `n` most recent episodes are
+    /// returned (still oldest-first).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a read transaction cannot be opened or if any
+    /// stored episode fails to deserialize.
+    pub fn list_memories(&self, hen_id: &HenId, limit: Option<usize>) -> Result<Vec<MemoryEntry>> {
+        let (lo, hi) = mem_range_bounds(hen_id);
+        let read = self.db.begin_read()?;
+        let table = read.open_table(MEMORIES_TABLE)?;
+        let mut out = Vec::new();
+        for entry in table.range::<&str>(lo.as_str()..hi.as_str())? {
+            let (_k, v) = entry?;
+            let mem: MemoryEntry = serde_json::from_slice(v.value())?;
+            out.push(mem);
+        }
+        if let Some(n) = limit
+            && out.len() > n
+        {
+            out.drain(0..out.len() - n);
+        }
+        Ok(out)
+    }
+
+    /// Prune a Hen's episodes recorded strictly before `cutoff`. Returns the
+    /// number of episodes removed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a transaction cannot be opened/committed or if a
+    /// stored episode fails to deserialize.
+    pub fn prune_memories(&self, hen_id: &HenId, cutoff: time::OffsetDateTime) -> Result<usize> {
+        let (lo, hi) = mem_range_bounds(hen_id);
+        let write = self.db.begin_write()?;
+        let mut removed = 0usize;
+        {
+            let mut table = write.open_table(MEMORIES_TABLE)?;
+            let mut stale: Vec<String> = Vec::new();
+            for entry in table.range::<&str>(lo.as_str()..hi.as_str())? {
+                let (k, v) = entry?;
+                let mem: MemoryEntry = serde_json::from_slice(v.value())?;
+                if mem.at < cutoff {
+                    stale.push(k.value().to_string());
+                }
+            }
+            for key in stale {
+                if table.remove(key.as_str())?.is_some() {
+                    removed += 1;
+                }
+            }
+        }
+        write.commit()?;
+        Ok(removed)
+    }
+
+    /// Delete all of a Hen's episodic memories. Returns the number removed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a transaction cannot be opened/committed or if a
+    /// stored key cannot be read.
+    pub fn delete_memories(&self, hen_id: &HenId) -> Result<usize> {
+        let (lo, hi) = mem_range_bounds(hen_id);
+        let write = self.db.begin_write()?;
+        let mut removed = 0usize;
+        {
+            let mut table = write.open_table(MEMORIES_TABLE)?;
+            let keys: Vec<String> = {
+                let mut ks = Vec::new();
+                for entry in table.range::<&str>(lo.as_str()..hi.as_str())? {
+                    let (k, _v) = entry?;
+                    ks.push(k.value().to_string());
+                }
+                ks
+            };
+            for key in keys {
+                if table.remove(key.as_str())?.is_some() {
+                    removed += 1;
+                }
+            }
+        }
+        write.commit()?;
+        Ok(removed)
+    }
 }
 
 #[cfg(test)]
@@ -257,5 +376,74 @@ mod tests {
         assert!(store.delete_hen(&id).unwrap());
         assert_eq!(store.list_hens().unwrap().len(), 2);
         assert!(store.get_hen(&id).is_err());
+    }
+
+    fn mem(
+        hen: &HenId,
+        id: &str,
+        at: time::OffsetDateTime,
+        outcome: coopd_core::MemoryOutcome,
+    ) -> MemoryEntry {
+        MemoryEntry {
+            id: id.to_string(),
+            hen_id: hen.clone(),
+            job_id: "j".to_string(),
+            at,
+            prompt: "p".to_string(),
+            summary: "s".to_string(),
+            turns: 1,
+            outcome,
+        }
+    }
+
+    #[test]
+    fn memory_order_limit_and_isolation() {
+        use coopd_core::MemoryOutcome::Done;
+        let dir = tempdir().unwrap();
+        let store = Store::open(dir.path().join("m.redb")).unwrap();
+        let aria = make_hen("aria").id;
+        let bolt = make_hen("bolt").id;
+        let t0 = time::OffsetDateTime::now_utc();
+        // Lexicographic ids a<b<c stand in for UUIDv7 chronological order.
+        store.put_memory(&mem(&aria, "a", t0, Done)).unwrap();
+        store.put_memory(&mem(&aria, "b", t0, Done)).unwrap();
+        store.put_memory(&mem(&aria, "c", t0, Done)).unwrap();
+        store.put_memory(&mem(&bolt, "z", t0, Done)).unwrap();
+
+        let all = store.list_memories(&aria, None).unwrap();
+        assert_eq!(
+            all.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["a", "b", "c"],
+            "oldest-first ordering"
+        );
+        let recent = store.list_memories(&aria, Some(2)).unwrap();
+        assert_eq!(
+            recent.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["b", "c"],
+            "limit keeps the most-recent N, oldest-first"
+        );
+        // Per-hen isolation: bolt's episode never bleeds into aria's range.
+        assert_eq!(store.list_memories(&bolt, None).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn memory_prune_and_delete() {
+        use coopd_core::MemoryOutcome::Done;
+        let dir = tempdir().unwrap();
+        let store = Store::open(dir.path().join("p.redb")).unwrap();
+        let aria = make_hen("aria").id;
+        let now = time::OffsetDateTime::now_utc();
+        let old = now - time::Duration::days(30);
+        store.put_memory(&mem(&aria, "old", old, Done)).unwrap();
+        store.put_memory(&mem(&aria, "new", now, Done)).unwrap();
+
+        let cutoff = now - time::Duration::days(7);
+        assert_eq!(store.prune_memories(&aria, cutoff).unwrap(), 1);
+        let kept = store.list_memories(&aria, None).unwrap();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].id, "new");
+
+        assert_eq!(store.delete_memories(&aria).unwrap(), 1);
+        assert!(store.list_memories(&aria, None).unwrap().is_empty());
     }
 }

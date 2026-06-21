@@ -21,6 +21,7 @@ pub mod hen;
 pub mod ids;
 pub mod job;
 pub mod manifest;
+pub mod memory;
 pub mod net;
 pub mod orchestrator;
 pub mod remote;
@@ -33,6 +34,9 @@ pub use hen::{Hen, HenState, LeaseStatus};
 pub use ids::{CoopId, HenId, RoostId};
 pub use job::{Job, JobStatus};
 pub use manifest::{AgentKind, AgentManifest};
+pub use memory::{
+    DEFAULT_MEMORY_CONTEXT_ENTRIES, MemoryEntry, MemoryOutcome, render_memory_context,
+};
 pub use net::{NetAllow, NetPolicy, NetworkSpec, ResolvedNetPolicy};
 pub use orchestrator::{OrchCmd, OrchEvent};
 pub use remote::{

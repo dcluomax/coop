@@ -27,3 +27,13 @@ network:
   allow:
     - host: api.anthropic.com
       ports: [443]
+
+# Persistent episodic memory (optional). When set, Coop records one compact
+# episode per completed job and replays the most recent ones into the hen's
+# system prompt next time — so the hen continues from context instead of
+# starting from zero. See docs/memory.md.
+memory:
+  # Drop episodes older than this many days (omit / 0 = keep indefinitely).
+  episodic_retention_days: 30
+  # Inherit another hen's memory at creation time, e.g. to fork a trained hen:
+  #   inherit_from: local.coop/aria

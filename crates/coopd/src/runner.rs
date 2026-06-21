@@ -79,6 +79,15 @@ async fn run_job(
         }
     }
 
+    // Persist an episodic memory of this job (success or failure) so the hen
+    // continues from context next time. Retention pruning happens in the
+    // orchestrator. Best-effort: memory is an enhancement, never fatal.
+    if let Some(entry) = coopd_core::MemoryEntry::from_job(&job) {
+        if let Err(e) = orch.record_memory(entry).await {
+            warn!(job_id = %job.id, error = %e, "failed to record episodic memory");
+        }
+    }
+
     let _ = orch
         .transition_hen(job.hen_id.clone(), HenState::Idle)
         .await;
@@ -88,7 +97,7 @@ async fn run_job(
 }
 
 async fn reason_loop(
-    _orch: &OrchHandle,
+    orch: &OrchHandle,
     tools: &Registry,
     brain: &dyn BrainAdapter,
     hen: &Hen,
@@ -96,13 +105,34 @@ async fn reason_loop(
     job: &mut Job,
 ) -> Result<String> {
     let manifest = &hen.manifest;
-    let system = manifest
+    let mut system = manifest
         .personality
         .as_ref()
         .and_then(|p| p.system_prompt.clone())
         .unwrap_or_else(|| {
             "You are a hen on a Coop farm. Use tools when needed. Be concise.".to_string()
         });
+
+    // Persistent memory: prepend the hen's recent episodes so it continues
+    // from prior context instead of starting from zero. Count is capped and
+    // overridable via COOP_MEMORY_CONTEXT_ENTRIES (0 disables injection).
+    let mem_limit = std::env::var("COOP_MEMORY_CONTEXT_ENTRIES")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(coopd_core::DEFAULT_MEMORY_CONTEXT_ENTRIES);
+    if mem_limit > 0 {
+        match orch.load_memories(hen.id.clone(), Some(mem_limit)).await {
+            Ok(mems) if !mems.is_empty() => {
+                let ctx = coopd_core::render_memory_context(&mems);
+                system = format!("{system}\n\n{ctx}");
+                debug!(hen_id = %hen.id, episodes = mems.len(), "injected memory context");
+            }
+            Ok(_) => {}
+            Err(e) => {
+                warn!(hen_id = %hen.id, error = %e, "load memories failed; continuing without")
+            }
+        }
+    }
 
     let mut messages: Vec<Message> = vec![Message {
         role: "user".into(),

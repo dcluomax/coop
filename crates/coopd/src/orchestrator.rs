@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use coopd_core::{
-    AgentManifest, CoopId, CoreError, Hen, HenId, HenState, Job, OrchCmd, OrchEvent,
+    AgentManifest, CoopId, CoreError, Hen, HenId, HenState, Job, MemoryEntry, OrchCmd, OrchEvent,
     Result as CoreResult,
 };
 use coopd_storage::Store;
@@ -125,6 +125,41 @@ impl OrchHandle {
     pub async fn update_job(&self, job: Job) -> CoreResult<()> {
         let (tx, rx) = oneshot::channel();
         self.send(OrchCmd::UpdateJob { job, reply: tx }).await?;
+        rx.await
+            .map_err(|_| CoreError::Other("orchestrator dropped reply".into()))?
+    }
+
+    /// Record an episodic memory for a Hen.
+    pub async fn record_memory(&self, entry: MemoryEntry) -> CoreResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.send(OrchCmd::RecordMemory { entry, reply: tx })
+            .await?;
+        rx.await
+            .map_err(|_| CoreError::Other("orchestrator dropped reply".into()))?
+    }
+
+    /// Load a Hen's recent episodic memories (oldest-first), capped at `limit`.
+    pub async fn load_memories(
+        &self,
+        hen_id: HenId,
+        limit: Option<usize>,
+    ) -> CoreResult<Vec<MemoryEntry>> {
+        let (tx, rx) = oneshot::channel();
+        self.send(OrchCmd::LoadMemories {
+            hen_id,
+            limit,
+            reply: tx,
+        })
+        .await?;
+        rx.await
+            .map_err(|_| CoreError::Other("orchestrator dropped reply".into()))?
+    }
+
+    /// Forget all of a Hen's episodic memories; returns the count removed.
+    pub async fn forget_memories(&self, hen_id: HenId) -> CoreResult<usize> {
+        let (tx, rx) = oneshot::channel();
+        self.send(OrchCmd::ForgetMemories { hen_id, reply: tx })
+            .await?;
         rx.await
             .map_err(|_| CoreError::Other("orchestrator dropped reply".into()))?
     }
@@ -272,6 +307,24 @@ async fn run(
                 }
                 let _ = reply.send(res);
             }
+            OrchCmd::RecordMemory { entry, reply } => {
+                let res = handle_record_memory(&store, &entry, &events);
+                let _ = reply.send(res);
+            }
+            OrchCmd::LoadMemories {
+                hen_id,
+                limit,
+                reply,
+            } => {
+                let res = store
+                    .list_memories(&hen_id, limit)
+                    .map_err(map_storage_err);
+                let _ = reply.send(res);
+            }
+            OrchCmd::ForgetMemories { hen_id, reply } => {
+                let res = store.delete_memories(&hen_id).map_err(map_storage_err);
+                let _ = reply.send(res);
+            }
             OrchCmd::DispatchNextQueued { hen_id, reply } => {
                 let res = handle_dispatch_next(
                     &store,
@@ -341,7 +394,41 @@ fn handle_create(
     if store.get_hen(&id).is_ok() {
         return Err(CoreError::Other(format!("hen already exists: {id}")));
     }
-    let hen = Hen::new(id.clone(), manifest);
+    let mut hen = Hen::new(id.clone(), manifest);
+    // Wire MemorySpec.inherit_from: a freshly created Hen can inherit a
+    // parent's episodic memory (copied under fresh ids) and record lineage,
+    // so it does not start from zero. Missing/invalid parents are non-fatal.
+    let inherit_from = hen
+        .manifest
+        .memory
+        .as_ref()
+        .and_then(|m| m.inherit_from.clone());
+    if let Some(parent_ref) = inherit_from {
+        match HenId::parse(&parent_ref) {
+            Ok(parent_id) => match store.get_hen(&parent_id) {
+                Ok(parent) => {
+                    let inherited = store
+                        .list_memories(&parent_id, None)
+                        .map_err(map_storage_err)?;
+                    let copied = inherited.len();
+                    for mem in &inherited {
+                        store
+                            .put_memory(&mem.reparented_to(id.clone()))
+                            .map_err(map_storage_err)?;
+                    }
+                    hen.lineage.parent = Some(parent_id.to_string());
+                    hen.lineage.generation = parent.lineage.generation.max(1) + 1;
+                    info!(%id, parent = %parent_id, copied, "hen inherited memory");
+                }
+                Err(_) => {
+                    warn!(%id, parent = %parent_ref, "inherit_from: parent not found; starting fresh");
+                }
+            },
+            Err(e) => {
+                warn!(%id, parent = %parent_ref, error = %e, "inherit_from: invalid parent id; starting fresh");
+            }
+        }
+    }
     store.put_hen(&hen).map_err(map_storage_err)?;
     let _ = events.send(OrchEvent::HenCreated { id: id.clone() });
     info!(%id, "hen created");
@@ -367,6 +454,40 @@ fn handle_transition(
     Ok(())
 }
 
+fn handle_record_memory(
+    store: &Store,
+    entry: &MemoryEntry,
+    events: &broadcast::Sender<OrchEvent>,
+) -> CoreResult<()> {
+    let hen_id = entry.hen_id.clone();
+    let entry_id = entry.id.clone();
+    store.put_memory(entry).map_err(map_storage_err)?;
+    let _ = events.send(OrchEvent::MemoryRecorded {
+        hen_id: hen_id.clone(),
+        entry_id,
+    });
+    // Enforce episodic retention (governance): drop episodes older than the
+    // manifest's window. Missing/zero retention keeps memory indefinitely.
+    if let Ok(hen) = store.get_hen(&hen_id)
+        && let Some(days) = hen
+            .manifest
+            .memory
+            .as_ref()
+            .and_then(|m| m.episodic_retention_days)
+        && days > 0
+    {
+        let cutoff = time::OffsetDateTime::now_utc() - time::Duration::days(i64::from(days));
+        match store.prune_memories(&hen_id, cutoff) {
+            Ok(n) if n > 0 => {
+                info!(%hen_id, pruned = n, retention_days = days, "pruned expired memories")
+            }
+            Ok(_) => {}
+            Err(e) => warn!(%hen_id, error = %e, "memory prune failed"),
+        }
+    }
+    Ok(())
+}
+
 fn handle_delete(
     store: &Store,
     id: &HenId,
@@ -376,6 +497,12 @@ fn handle_delete(
     if !removed {
         warn!(%id, "delete: hen not found");
         return Err(CoreError::HenNotFound(id.to_string()));
+    }
+    // Right-to-forget: a deleted Hen's episodic memory is purged too.
+    match store.delete_memories(id) {
+        Ok(n) if n > 0 => info!(%id, purged = n, "purged hen memories on delete"),
+        Ok(_) => {}
+        Err(e) => warn!(%id, error = %e, "failed to purge hen memories on delete"),
     }
     let _ = events.send(OrchEvent::HenDeleted { id: id.clone() });
     info!(%id, "hen deleted");

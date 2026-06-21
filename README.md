@@ -38,6 +38,7 @@ One static binary: no Python, no Docker required.
 | 🏡 **Self-hosted** | Your hardware, your agents, your data. No mandatory cloud. |
 | 🔐 **BYOK vault** | Sealed `xchacha20poly1305` vault for your model keys, or pull them from **Azure Key Vault**. Locked at rest. |
 | 🤖 **Real autonomy** | Hens get a sandboxed PTY shell, a tool ABI, and a pluggable brain — **Anthropic**, **OpenAI**, or any OpenAI-compatible server (Ollama, vLLM, OpenRouter…). |
+| 🧠 **Persistent memory** | Hens remember. Each job becomes a compact *episode* replayed into the next run, with retention + inheritance — so a hen continues from context, not from zero. |
 | 🧱 **Per-hen isolation** | Each hen runs in its own OS sandbox (macOS Seatbelt / Linux Bubblewrap) — confined to its workdir, scrubbed env, siblings unreadable. |
 | 🌐 **Network egress policy** | Per-hen `network:` block — `off` / `allowlist` / `open`. Fail-closed: a hen that can't enforce its policy refuses to hatch. |
 | 🖥️ **Live shell** | Click any hen in the Farm UI to drop into a real terminal in its workdir. |

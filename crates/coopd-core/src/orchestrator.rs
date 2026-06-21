@@ -85,6 +85,31 @@ pub enum OrchCmd {
         /// Reply channel.
         reply: oneshot::Sender<Result<()>>,
     },
+    /// Record an episodic memory for a Hen (used by runner after a job
+    /// reaches a terminal state).
+    RecordMemory {
+        /// The episode to persist.
+        entry: crate::MemoryEntry,
+        /// Reply channel.
+        reply: oneshot::Sender<Result<()>>,
+    },
+    /// Load a Hen's most recent episodic memories (oldest-first), capped at
+    /// `limit` when provided.
+    LoadMemories {
+        /// Hen identifier.
+        hen_id: HenId,
+        /// Maximum number of most-recent episodes to return.
+        limit: Option<usize>,
+        /// Reply channel.
+        reply: oneshot::Sender<Result<Vec<crate::MemoryEntry>>>,
+    },
+    /// Forget all of a Hen's episodic memories. Replies with the count removed.
+    ForgetMemories {
+        /// Hen identifier.
+        hen_id: HenId,
+        /// Reply channel returning the number of episodes deleted.
+        reply: oneshot::Sender<Result<usize>>,
+    },
     /// Try to pick up the next Queued job for a Hen (used by runner after a
     /// job completes; the orchestrator inspects state and spawns the next
     /// runner if the hen is Idle and a Queued job exists).
@@ -134,6 +159,13 @@ pub enum OrchEvent {
         job_id: String,
         /// New status.
         status: crate::JobStatus,
+    },
+    /// An episodic memory was recorded for a Hen (audit/legibility).
+    MemoryRecorded {
+        /// Owning Hen.
+        hen_id: HenId,
+        /// Episode identifier.
+        entry_id: String,
     },
     /// Orchestrator is shutting down.
     ShuttingDown,
