@@ -164,6 +164,19 @@ g "stored byok-anthropic secret"
 status_before=$(j_get "$(curl -fsS "$API/api/v1/vault/status")" "unlocked")
 [[ "$status_before" == "false" ]] && g "vault locked pre-unlock" || { r "expected locked"; exit 1; }
 
+# Starter preflight must fail before creating anything when the provider is
+# unavailable. This keeps first-run errors immediate and avoids zombie Hens.
+b "[2b] starter provider preflight"
+if preflight_out=$("$ROOT/target/debug/coop" --api "$API" hen starter blocked 2>&1); then
+  r "starter unexpectedly succeeded with a locked vault: $preflight_out"
+  exit 1
+fi
+echo "$preflight_out" | grep -q 'vault is locked' \
+  && g "locked vault fails before Hen creation" \
+  || { r "unexpected preflight error: $preflight_out"; exit 1; }
+n=$(j_get "$(curl -fsS "$API/api/v1/farm")" "hen_count")
+[[ "$n" == "0" ]] && g "failed preflight left no partial Hen" || { r "preflight created $n Hen(s)"; exit 1; }
+
 # 3. vault unlock
 b "[3] vault unlock"
 unlock_body=$(curl -fsS -X POST "$API/api/v1/vault/unlock" \
@@ -172,6 +185,16 @@ unlock_body=$(curl -fsS -X POST "$API/api/v1/vault/unlock" \
 [[ "$(j_get "$unlock_body" ok)" == "true" ]] && g "unlock OK" || { r "unlock failed: $unlock_body"; exit 1; }
 status_after=$(j_get "$(curl -fsS "$API/api/v1/vault/status")" "unlocked")
 [[ "$status_after" == "true" ]] && g "vault unlocked" || { r "expected unlocked"; exit 1; }
+
+# A typo in the provider reference must also fail before creation.
+if missing_out=$("$ROOT/target/debug/coop" --api "$API" hen starter missing \
+  --provider-id vault:does-not-exist 2>&1); then
+  r "starter unexpectedly succeeded with a missing secret: $missing_out"
+  exit 1
+fi
+echo "$missing_out" | grep -q 'vault secret `does-not-exist` is missing' \
+  && g "missing provider secret fails clearly" \
+  || { r "unexpected missing-secret error: $missing_out"; exit 1; }
 
 # 6. WSS subscriber
 b "[6] WSS /watch (start subscriber)"
@@ -209,17 +232,12 @@ for _ in $(seq 1 40); do
 done
 [[ -f "$WSS_READY" ]] && g "WSS subscriber attached" || { r "WSS subscriber failed to connect"; kill "$WSS_PID" 2>/dev/null; exit 1; }
 
-# 4. create hen
-b "[4] create hen"
-hen_yaml=$'spec_version: coop/v1\nname: aria\nbrain:\n  provider_id: vault:byok-anthropic\n  model: claude-sonnet-4-5-20250929\ntools: [bash, file_read, file_write]\n'
-create_body=$(curl -fsS -X POST "$API/api/v1/hens" \
-  -H 'content-type: application/yaml' \
-  --data-binary "$hen_yaml")
-[[ "$create_body" == '"local.coop/aria"' ]] && g "hen created" || { r "create unexpected: $create_body"; exit 1; }
-
-# 5. hatch
-b "[5] hatch hen"
-curl -fsS -X POST "$API/api/v1/hens/local.coop%2Faria/hatch" >/dev/null
+# 4 + 5. YAML-free starter path: create + hatch in one command.
+b "[4/5] create + hatch starter Hen"
+starter_out=$("$ROOT/target/debug/coop" --api "$API" hen starter aria)
+echo "$starter_out" | grep -q 'local.coop/aria' \
+  && g "starter Hen created without YAML" \
+  || { r "starter output unexpected: $starter_out"; exit 1; }
 sleep 0.3
 state=$(j_get "$(curl -fsS "$API/api/v1/hens/local.coop%2Faria")" "state")
 [[ "$state" == "IDLE" ]] && g "hen reached IDLE" || { r "expected IDLE got $state"; exit 1; }
@@ -407,8 +425,9 @@ else
   y "persistent tmux reconnect skipped ($(j_get "$caps" note))"
 fi
 
-# Verify static UI is served.
-ui_head=$(curl -fsS "$API/" | head -1 || true)
+# Verify static UI is served without a `curl | head` broken-pipe warning.
+ui_html=$(curl -fsS "$API/")
+ui_head=${ui_html%%$'\n'*}
 [[ "$ui_head" == "<!doctype html>" ]] && g "farm UI served at /" || { r "UI not served; got: $ui_head"; exit 1; }
 
 # 9. reconciler

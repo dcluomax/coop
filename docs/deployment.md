@@ -12,20 +12,19 @@ Three supported ways to run `coopd` beyond a foreground `coopd serve &`.
 Prebuilt binaries, packages, and source installs:
 
 ```bash
-# Homebrew (macOS + Linux)
-brew install dcluomax/coop/coop
+# Verified installer (macOS + Linux + Raspberry Pi)
+curl -fsSL https://raw.githubusercontent.com/dcluomax/coop/main/scripts/install.sh | sh
 
 # Debian / Ubuntu / Raspberry Pi OS (.deb — amd64, arm64, armhf)
 # Download the asset for your arch from the latest release, then:
 sudo apt install ./coop_<version>_<arch>.deb   # pulls in bubblewrap + tmux,
                                                # installs the coopd systemd unit
 
-# Cargo (any platform with a Rust toolchain)
-cargo binstall coop-cli      # prebuilt, or:
-cargo install coop-cli       # from source
-
-# Raw tarball / install script
-curl -fsSL https://raw.githubusercontent.com/dcluomax/coop/main/scripts/install.sh | sudo sh
+# Source (any platform with Rust 1.85+)
+git clone https://github.com/dcluomax/coop.git
+cd coop
+cargo install --path crates/coopd
+cargo install --path crates/coop-cli
 ```
 
 The `.deb` installs `coopd`/`coop` to `/usr/bin`, drops the hardened

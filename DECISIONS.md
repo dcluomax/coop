@@ -124,23 +124,26 @@ Crates deferred to later phases:
 
 ## v0.1 Implementation Notes (added during build)
 
-- **Open-core split: `coopd-market` is proprietary.** The cross-Coop market crate
-  (listings, bids, escrow) lives in a separate **private** repo, `coop-market`,
-  and is wired into the OSS daemon via an optional Cargo feature
-  (`--features market`) with a path dependency to a sibling checkout. This
-  preserves the Coop substrate as fully usable open source ("raise, train, and
-  run hens on your own hardware") while keeping the monetization layer — the
-  thing that funds the project — proprietary. Rationale: the open core is the
-  agent OS people self-host; the market is the federation/payments layer that
-  becomes a SaaS business at scale. OSS users get a complete single-farm
-  experience; commercial users license the market crate.
+- **Open-core split: `coopd-market` is proprietary.** The cross-Coop market
+  layer lives in a separate **private** repo, `coop-market`. The OSS daemon has
+  no dependency, feature flag, API/config hook, UI tab, or market types. This
+  preserves Coop as a complete single-farm experience while keeping the future
+  cross-farm commercial layer separate.
   - Architectural contract: see [AGENTS.md](./AGENTS.md) — code in this repo
     MUST NOT contain market types, payment logic, or any reference that leaks
-    `coop-market` internals.
-- **In-process tools (no subprocess sandbox).** v0.1 runs `bash` / `file_*` / `http` directly in coopd's tokio runtime. This is acceptable for the single-trust-domain "alone farmer" milestone. v0.2 will introduce subprocess + container isolation per tool — see [coop-l1-os] design doc.
-- **Reason loop encodes tool results as plaintext user messages.** v0.1 does not use Anthropic's structured `tool_use` / `tool_result` content blocks. This works for short flows but loses fidelity on multi-turn conversations. Upgrade in v0.2.
+    `coop-market` internals. `scripts/check-open-core-boundary.sh` enforces the
+    runtime boundary in CI.
+- **Tool isolation is capability-specific.** `bash` runs through the OS sandbox
+  (macOS Seatbelt / Linux Bubblewrap) with a fixed PATH, scrubbed environment,
+  resource limits, and per-Hen workdir/network policy. `file_*` and `http` stay
+  in-process but enforce canonical path confinement and SSRF/egress policy.
+- **Structured tool fidelity landed.** The reason loop preserves typed
+  `tool_use` / `tool_result` blocks and provider call ids across Anthropic and
+  OpenAI-compatible adapters.
 - **Single startup reconciler, no periodic tick.** On boot, any Job left `RUNNING` is marked `FAILED("interrupted at restart")` and any Hen left `Hatching`/`Working` is forced back to `Idle`. There is no periodic reconciliation tick — only at process start.
-- **Brain factory resolves only `vault:<secret-name>` provider IDs.** Any other `brain.provider_id` is rejected. v0.2 will add registry-style adapters.
+- **Brain factory supports multiple secret backends.** Provider ids resolve
+  from the local sealed `vault:`, Azure Key Vault references, or `none` for
+  keyless local OpenAI-compatible servers.
 - **Vault auto-unlock from env.** If `COOP_VAULT` and `COOP_PASSPHRASE` are both set, the vault unlocks at startup. Otherwise it remains locked until `POST /api/v1/vault/unlock`.
 - **MAX_TURNS = 16** per job in the reason loop. Hard-coded safety cap for v0.1.
 - **`coopd-tools` and `coopd-brain` crates exist now** (previously listed as deferred). Adapter trait still lives in `coopd-core::brain`.

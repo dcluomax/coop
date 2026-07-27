@@ -2,7 +2,7 @@
 
 # 🐔 Coop
 
-### *Raise, train, and trade autonomous AI agents on your own hardware.*
+### *Hatch, run, and grow autonomous AI agents on your own hardware.*
 
 [![CI](https://github.com/dcluomax/coop/actions/workflows/ci.yml/badge.svg)](https://github.com/dcluomax/coop/actions/workflows/ci.yml)
 [![Release](https://github.com/dcluomax/coop/actions/workflows/release.yml/badge.svg)](https://github.com/dcluomax/coop/actions/workflows/release.yml)
@@ -25,8 +25,10 @@
 ---
 
 **Coop** is an open-source AI agent farm OS in Rust. Run autonomous AI agents —
-**Hens** — on a Raspberry Pi, a Mac, a Windows box, or a fleet of cloud nodes.
-One static binary: no Python, no Docker required.
+**Hens** — on a Raspberry Pi, a Mac, a Windows box, or a cloud node. Hens work,
+remember what happened, inherit experience, and delegate to specialists on the
+same farm. Two native binaries (`coopd` + `coop`); no Python or Docker required
+for the core runtime.
 
 > 🚧 **Pre-alpha** — `v0.1 "ALONE FARMER"`. See [DECISIONS.md](./DECISIONS.md)
 > for scope and [CHANGELOG.md](./CHANGELOG.md) for what shipped.
@@ -44,14 +46,13 @@ One static binary: no Python, no Docker required.
 | 🌐 **Network egress policy** | Per-hen `network:` block — `off` / `allowlist` / `open`. Fail-closed: a hen that can't enforce its policy refuses to hatch. |
 | 🖥️ **Live shell** | Click any hen in the Farm UI to drop into a real terminal in its workdir. |
 | 🍓 **Runs on a Pi** | First-class binaries for Raspberry Pi 3/4/5 + Pi Zero 2. |
-| ⚡ **One static binary** | `coopd` daemon + `coop` CLI. No runtime deps. |
+| ⚡ **Native install** | Two small binaries: the `coopd` daemon + `coop` CLI. |
 
 ## 🚀 Quickstart
 
 ```bash
 # 1. install coopd + coop
 curl -fsSL https://raw.githubusercontent.com/dcluomax/coop/main/scripts/install.sh | sh
-# …or, with a Rust toolchain:  cargo binstall coop-cli   (prebuilt, no compile)
 
 # 2. start the daemon
 coopd serve &
@@ -61,7 +62,8 @@ open http://127.0.0.1:9700/      # Farm UI
 coop hen list
 ```
 
-Defining a Hen, sealing your model key, and running your first job →
+Sealing your model key, hatching a starter Hen without YAML, and running your
+first job →
 **[docs/quickstart.md](./docs/quickstart.md)**.
 
 Prefer source? `git clone … && cargo build --release` (Rust 1.85+), binaries land
@@ -71,12 +73,12 @@ in `target/release/`.
 
 | Target | Command |
 |--------|---------|
+| ⚡ **Installer** | `curl -fsSL https://raw.githubusercontent.com/dcluomax/coop/main/scripts/install.sh \| sh` |
 | 🐳 **Docker** | `docker compose up -d` ([compose](./docker-compose.yml)) |
-| 🍺 **Homebrew** | `brew install dcluomax/coop/coop` (macOS + Linux) |
 | 📦 **Debian/Ubuntu/Pi** | `sudo apt install ./coop_*_<arch>.deb` (amd64 · arm64 · armhf) |
 | 🛠️ **systemd** | `contrib/systemd/coopd.service` (24/7 bare metal) |
 | 📥 **Binaries** | [latest release](https://github.com/dcluomax/coop/releases/latest) — 7 platforms, SHA-256 checksums |
-| 📦 **cargo-binstall** | `cargo binstall coop-cli` — fetches the prebuilt release binary for your platform |
+| 🦀 **Source** | `cargo build --release --workspace` |
 
 Full guide, including LAN/public exposure and the **required** `COOP_API_TOKEN`
 + `COOP_PUBLIC` settings → **[docs/deployment.md](./docs/deployment.md)**.
@@ -94,10 +96,11 @@ Coop is organised into four conceptual layers — **this repo is L1** (the agent
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Workspace (7 OSS crates):** `coopd` (daemon — HTTP/WS API, orchestrator) ·
+**Workspace (8 OSS crates):** `coopd` (daemon — HTTP/WS API, orchestrator) ·
 `coopd-core` (types/traits) · `coopd-storage` (redb) · `coopd-vault` (sealed
 BYOK) · `coopd-tools` (`bash`/`file_*`/`http`) · `coopd-brain` (Anthropic +
-OpenAI / OpenAI-compatible adapters) · `coop-cli` (the `coop` binary).
+OpenAI / OpenAI-compatible adapters) · `coopd-discord` (optional connector) ·
+`coop-cli` (the `coop` binary).
 
 ## 🖥️ Farm UI
 

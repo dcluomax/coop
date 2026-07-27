@@ -1228,34 +1228,6 @@
       color: var(--muted); font-size: 11px;
     }
 
-    /* === Market pane === */
-    .market-pane {
-      grid-column: 1 / -1; padding: 36px 22px; overflow-y: auto; min-width: 0;
-      display: grid; place-items: start center;
-    }
-    .market-card {
-      max-width: 640px;
-      background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
-      padding: 28px 32px;
-    }
-    .market-card h2 { margin: 0 0 14px; font-size: 22px; }
-    .market-card p { color: var(--fg); line-height: 1.55; margin: 0 0 12px; }
-    .market-card p.muted { color: var(--muted); font-size: 12px; }
-    .market-card code {
-      background: var(--bg); padding: 1px 5px; border-radius: 4px;
-      font-size: 11px; color: var(--accent-2);
-    }
-    .market-actions {
-      display: flex; align-items: center; gap: 16px; margin-top: 18px;
-    }
-    .market-cta {
-      background: linear-gradient(180deg, #ffd773, #ffb441); color: #2a1d05;
-      padding: 9px 18px; border-radius: 10px; font-weight: 700;
-      text-decoration: none; font-size: 13px;
-    }
-    .market-cta:hover { filter: brightness(1.06); }
-    .market-status { color: var(--muted); font-size: 12px; }
-
     /* ===== Tasks pane ===== */
     .tasks-pane { padding: 24px; max-width: 980px; margin: 0 auto; width: 100%; box-sizing: border-box; }
     .tasks-composer { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; margin-bottom: 18px; }
@@ -1300,7 +1272,6 @@
       <button class="navtab active" data-tab="tasks">📋 Tasks</button>
       <button class="navtab" data-tab="sessions">🖥 Sessions</button>
       <button class="navtab" data-tab="agents">🐔 Agents</button>
-      <button class="navtab" data-tab="market" title="Cross-coop compute market (private repo)">🛒 Market</button>
     </nav>
     <span class="pill" id="savings-pill" title="Estimated savings from delegated work">💰 <span id="savings-text">$0 · 0 min</span></span>
     <span class="pill" id="status-pill"><span class="dot"></span><span id="status-text">connecting…</span></span>
@@ -1468,32 +1439,6 @@
       </div>
       <div class="tasks-list" id="tasks-list">
         <div class="tasks-empty">No tasks yet.</div>
-      </div>
-    </section>
-  </main>
-
-  <!-- ============================== MARKET TAB ============================== -->
-  <main class="tabview" id="tab-market" hidden>
-    <section class="market-pane">
-      <div class="market-card">
-        <h2>🛒 Public Coop Market</h2>
-        <p>
-          Open the public market where any connected farm can sell spare hen
-          capacity and any buyer can bid for cross-coop work. This is the
-          shared trading venue for the whole Coop network.
-        </p>
-        <p class="muted">
-          The market layer ships in a separate repository,
-          <code>coop-market</code>, which keeps the proprietary listing /
-          escrow / federation code out of the OSS daemon (see open-core split
-          in <code>AGENTS.md</code>).
-        </p>
-        <div class="market-actions">
-          <a class="market-cta" id="market-cta" href="https://farm.startcaas.com" target="_blank" rel="noreferrer">
-            Open Public Market ↗
-          </a>
-          <span class="market-status" id="market-status">loading market config…</span>
-        </div>
       </div>
     </section>
   </main>
@@ -2675,7 +2620,7 @@
     setInterval(fetchAll, 30000);
 
     // ==========================================================
-    //  Top-tab nav (Tasks / Sessions / Agents / Market)
+    //  Top-tab nav (Tasks / Sessions / Agents)
     // ==========================================================
     function switchTab(name) {
       activeTab = name;
@@ -2685,11 +2630,9 @@
       $('tab-tasks').hidden    = name !== 'tasks';
       $('tab-sessions').hidden = name !== 'sessions';
       $('tab-agents').hidden   = name !== 'agents';
-      $('tab-market').hidden   = name !== 'market';
       if (name === 'tasks')    refreshTasks();
       if (name === 'sessions') { refreshOpenHenSelect(); renderTmuxTabs(); if (activeTmuxHen) { const t = tmuxTabs[activeTmuxHen]; setTimeout(() => { try { t.fit.fit(); } catch(_){} t.term.focus(); }, 50); } }
       if (name === 'agents')   { measureStage(); renderYard(); }
-      if (name === 'market')   refreshMarketStatus();
     }
     for (const btn of document.querySelectorAll('.topnav .navtab')) {
       btn.onclick = () => switchTab(btn.dataset.tab);
@@ -2698,7 +2641,6 @@
     $('tab-tasks').hidden    = false;
     $('tab-sessions').hidden = true;
     $('tab-agents').hidden   = true;
-    $('tab-market').hidden   = true;
     document.querySelector('.topnav .navtab[data-tab="tasks"]').classList.add('active');
 
     // ==========================================================
@@ -2877,29 +2819,6 @@
     refreshOpenHenSelect();
     renderTmuxTabs();
     showTmuxEmpty(true);
-
-    // ==========================================================
-    //  Market tab — public market URL comes from coopd config.
-    // ==========================================================
-    async function refreshMarketStatus() {
-      const el = $('market-status');
-      if (!el) return;
-      const cta = $('market-cta');
-      el.textContent = 'loading market config…';
-      try {
-        const r = await fetch(`${API}/api/v1/config/market`, { method: 'GET' });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const cfg = await r.json();
-        const url = new URL(cfg.public_url || 'https://farm.startcaas.com');
-        if (cta) cta.href = url.toString();
-        el.textContent = `✅ public market configured · ${url.host}`;
-        el.style.color = 'var(--accent-2)';
-      } catch (e) {
-        if (cta) cta.href = 'https://farm.startcaas.com';
-        el.textContent = '⚠ using default public market · farm.startcaas.com';
-        el.style.color = 'var(--muted)';
-      }
-    }
 
     // ==========================================================
     //  Game interactions: command bar, context menu, drag, day/night
