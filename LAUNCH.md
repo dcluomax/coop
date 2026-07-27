@@ -13,7 +13,7 @@
 |---|---|---|
 | **LoC** | ~14.1K Rust | `find crates -name '*.rs' ...` |
 | **Crates** | 8 OSS crates (including `coopd-discord`); proprietary cross-farm layer remains separate | `Cargo.toml`, `AGENTS.md` |
-| **Tests** | 169 unit tests, all green | `cargo test --workspace` |
+| **Tests** | 170 unit tests, all green | `cargo test --workspace` |
 | **E2E** | Mock lifecycle, memory, delegation, PTY, events, and restart recovery passing | `scripts/e2e.sh` |
 | **Demos** | Farm UI demo + lifecycle E2E | `scripts/farm-demo.sh`, `scripts/e2e.sh` |
 | **CI** | ubuntu + macos matrix, fmt + clippy + test + doc + e2e | `.github/workflows/ci.yml` |
