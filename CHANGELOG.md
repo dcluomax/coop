@@ -8,6 +8,10 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
 
 ### Added
 
+- **YAML-free first hatch** — `coop hen starter [name]` creates and hatches a
+  ready-to-work Anthropic Hen with local tools and 30-day episodic memory, then
+  prints the exact first-job command. Provider secret/model remain overridable;
+  locked vaults and missing secrets fail before creating a partial Hen.
 - **In-farm delegation** — a Hen granted the new `delegate` tool becomes a
   *manager* that can hand a subtask to another Hen on the same farm and wait
   for its result. The sub-job runs as an ordinary job on the **target** Hen
@@ -40,6 +44,20 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
   - Audit: orchestrator emits a `memory_recorded` event per episode.
   - `semantic_summarize_every` remains reserved (LLM-summarized memory is a
     future phase). See `docs/memory.md`.
+
+### Changed
+
+- **OSS product surface now matches the open-core boundary.** Removed the
+  proprietary Market config endpoint and Farm UI tab from `coopd`; a new
+  `scripts/check-open-core-boundary.sh` gate blocks crate/config/API/UI leaks in
+  CI.
+- README now leads with shipped single-farm value (hatch, work, remember,
+  delegate) and lists only install paths that are currently available.
+
+### Fixed
+
+- `scripts/farm-demo.sh` no longer fails under `set -o pipefail` when
+  `grep -q` closes its input pipe after finding a UI marker.
 
 ## [0.1.0-alpha.2] - 2026-06-11
 

@@ -28,25 +28,28 @@ never touches disk.
 COOP_VAULT=~/.coop/vault.json coopd serve &
 ```
 
-## 4. Define + run a Hen
+## 4. Hatch a starter Hen — no YAML required
 
-A starter manifest lives at [`examples/aria.yaml`](../examples/aria.yaml):
-
-```yaml
-spec_version: coop/v1
-name: aria
-brain:
-  provider_id: vault:byok-anthropic
-  model: claude-sonnet-4-5-20250929
-tools: [bash, file_read, file_write, http]
-```
+The starter command creates a safe, cross-platform Hen with `bash`,
+`file_read`, and `file_write`, enables 30-day episodic memory, and hatches it:
 
 ```bash
-coop hen create examples/aria.yaml
-coop hen hatch  local.coop/aria
-coop job run    local.coop/aria "list files in your workdir using bash"
-coop job wait   <job-id>
+coop hen starter aria
+coop job run local.coop/aria "Create hello.txt with one useful idea"
+coop job wait <job-id>
 ```
+
+Use a different secret reference or model when needed:
+
+```bash
+coop hen starter pepper \
+  --provider-id vault:my-anthropic-key \
+  --model claude-sonnet-4-5-20250929
+```
+
+For full control over tools, personality, network policy, fallbacks, and
+inheritance, edit [`examples/aria.yaml`](../examples/aria.yaml) and use
+`coop hen create examples/aria.yaml`.
 
 Open <http://127.0.0.1:9700/> to watch your hens in the Farm UI — click any hen
 to drop into a live PTY shell in its workdir.

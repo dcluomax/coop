@@ -87,10 +87,10 @@ state=$(printf '%s' "$detail" | "$PY" -c 'import sys,json;print(json.load(sys.st
 
 b "[5] / UI serves single-page app"
 ui=$(curl -fsS "$API/")
-echo "$ui" | grep -q '<title>🐔 Coop Farm</title>' && g "title present"   || { r "title missing"; exit 1; }
-echo "$ui" | grep -q 'cdn.jsdelivr.net/npm/xterm'   && g "xterm.js linked"  || { r "xterm missing"; exit 1; }
-echo "$ui" | grep -q '/api/v1/hens'                 && g "calls hens API"   || { r "API call missing"; exit 1; }
-echo "$ui" | grep -q '/shell'                       && g "wires shell WSS"  || { r "shell WSS missing"; exit 1; }
+[[ "$ui" == *'<title>🐔 Coop Farm</title>'* ]] && g "title present"   || { r "title missing"; exit 1; }
+[[ "$ui" == *'cdn.jsdelivr.net/npm/xterm'* ]]   && g "xterm.js linked"  || { r "xterm missing"; exit 1; }
+[[ "$ui" == *'/api/v1/hens'* ]]                 && g "calls hens API"   || { r "API call missing"; exit 1; }
+[[ "$ui" == *'/shell'* ]]                       && g "wires shell WSS"  || { r "shell WSS missing"; exit 1; }
 
 b "[6] WSS shell into a specific hen"
 "$PY" - "$PORT" <<'PY'

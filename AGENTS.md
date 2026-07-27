@@ -27,15 +27,17 @@ to the World relay).
 ┌────────────────────────────────┐      ┌─────────────────────────────┐
 │  coop  (PUBLIC, Apache-2.0)    │      │  coop-market  (PRIVATE)     │
 │  ─────────────────────────     │      │  ───────────────────────    │
-│  crates/coopd                  │◄─────┤  coopd-market (optional)    │
-│  crates/coopd-core             │ path │  scripts/market-demo.sh     │
-│  crates/coopd-storage          │ dep  │                             │
+│  crates/coopd                  │      │  proprietary component      │
+│  crates/coopd-core             │      │  separate implementation    │
+│  crates/coopd-storage          │      │                             │
 │  crates/coopd-vault            │      │  Sibling-checkout pattern:  │
 │  crates/coopd-tools            │      │  ~/coop/                    │
 │  crates/coopd-brain            │      │  ~/coop-market/             │
 │  crates/coop-cli               │      │                             │
 └────────────────────────────────┘      └─────────────────────────────┘
 ```
+
+There is **no code dependency or import path** between the two repositories.
 
 ### Rules for agents editing this repo
 
@@ -62,8 +64,9 @@ cargo build
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 
-# Sanity check: this should return zero matches
-grep -r "coopd_market\|coopd-market" crates/ scripts/ .github/
+# Enforced boundary: crate references, config/API/UI hooks, and proprietary
+# service URLs all fail this check.
+./scripts/check-open-core-boundary.sh
 ```
 
 ## Repository map
@@ -92,7 +95,7 @@ grep -r "coopd_market\|coopd-market" crates/ scripts/ .github/
 2. PLAN       → Update GitHub issue with decomposition
 3. EXECUTE    → Make precise surgical changes; one logical change per commit
 4. SELF-REVIEW → cargo fmt + cargo clippy --workspace -- -D warnings + cargo test
-5. BUILD      → cargo build --workspace (and --features market if touching coopd)
+5. BUILD      → cargo build --workspace
 6. SHIP       → Sign off with DCO trailer, conventional commit, open PR
 ```
 

@@ -22,7 +22,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test --workspace
 ./scripts/e2e.sh         # 12-step end-to-end (mock mode, no API key needed)
 ./scripts/farm-demo.sh   # multi-hen farm demo
-./scripts/market-demo.sh # market lifecycle demo
+./scripts/check-open-core-boundary.sh
 ```
 
 ## Architecture orientation
@@ -34,7 +34,6 @@ cargo test --workspace
     │
     ├─ coopd-brain   ┐
     ├─ coopd-tools   ├─ all import coopd-core
-    ├─ coopd-market  │
     ├─ coopd-storage │
     └─ coopd-vault   ┘
        └────────────── coopd-core (types, traits)

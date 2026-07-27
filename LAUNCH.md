@@ -1,7 +1,9 @@
 # Coop — Open-Source Launch Plan (v0.1.0-alpha)
 
 > Researched & drafted by 最强大脑 + 最强创业者 review.
-> Status: ready to execute pending Max's final green light on **GitHub org creation**.
+> Status: **public pre-alpha shipped under `dcluomax/coop`**. This document
+> retains the original launch rationale; current release state lives in
+> `CHANGELOG.md` and GitHub Releases.
 
 ---
 
@@ -9,17 +11,17 @@
 
 | Area | State | Evidence |
 |---|---|---|
-| **LoC** | ~4.6K Rust + ~600 bash | `wc -l crates/*/src/*.rs scripts/*.sh` |
-| **Crates** | 7 (`coopd`, `coopd-core`, `coopd-storage`, `coopd-vault`, `coopd-tools`, `coopd-brain`, `coop-cli`) — `coopd-market` is **proprietary** (sibling `coop-market` repo, open-core split) | `Cargo.toml`, `AGENTS.md` |
-| **Tests** | 27 unit, all green | `cargo test --workspace` |
-| **E2E** | 12 / 12 checks passing on mock mode | `scripts/e2e.sh` |
-| **Demos** | farm-demo 8/8 (market-demo lives in private `coop-market` repo) | `scripts/*.sh` |
+| **LoC** | ~14.1K Rust | `find crates -name '*.rs' ...` |
+| **Crates** | 8 OSS crates (including `coopd-discord`); proprietary cross-farm layer remains separate | `Cargo.toml`, `AGENTS.md` |
+| **Tests** | 169 unit tests, all green | `cargo test --workspace` |
+| **E2E** | Mock lifecycle, memory, delegation, PTY, events, and restart recovery passing | `scripts/e2e.sh` |
+| **Demos** | Farm UI demo + lifecycle E2E | `scripts/farm-demo.sh`, `scripts/e2e.sh` |
 | **CI** | ubuntu + macos matrix, fmt + clippy + test + doc + e2e | `.github/workflows/ci.yml` |
-| Toolchain | `rust-toolchain.toml` channel = `"stable"`; workspace lints use `clippy::all` only (no `pedantic`) | `Cargo.toml`, `rust-toolchain.toml` |
+| Toolchain | Rust `1.91.1` pinned in local + CI; workspace lints use `clippy::all` plus selected correctness lints | `Cargo.toml`, `rust-toolchain.toml` |
 | **License** | Apache-2.0 (code) + CC-BY-4.0 (spec) + CC-BY-SA-4.0 (assets) | `LICENSE-APACHE`, `NOTICE` |
 | **Docs** | `README.md`, `DECISIONS.md`, this `LAUNCH.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md` | (committed) |
-| **Brand** | Coop, hens, roost, farm, market, grain — internally consistent | code + docs |
-| **Auth** | None on local API (loopback only) — documented in SECURITY.md | known limitation |
+| **Brand** | Coop, hens, roost, farm, memory, delegation — internally consistent | code + docs |
+| **Auth** | Optional bearer auth; safe-origin loopback enforcement by default; public mode requires explicit opt-in | `SECURITY.md`, `docs/deployment.md` |
 | **Demoable artifact** | `localhost:9700/` Farm UI with PTY shells | `crates/coopd/src/ui/farm.html` |
 
 **Verdict**: production-quality scaffolding for a pre-alpha. Safe to publish.
@@ -62,15 +64,15 @@
 - [x] `.github/PULL_REQUEST_TEMPLATE.md`
 - [x] `.github/FUNDING.yml` (commented stub)
 - [x] CI passes on `main`
-- [ ] README screenshot/GIF of Farm UI (do this after first push, add via PR)
-- [ ] Repo description + topics set on GitHub (see §4)
+- [x] README screenshot/GIF of Farm UI
+- [x] Repo description + topics set on GitHub
 
 ### Crate metadata (before `cargo publish`)
 - [ ] Each `Cargo.toml` has `description`, `keywords`, `categories`, `license = "Apache-2.0"`, `repository`, `homepage`, `readme`.
 - [ ] Run `cargo publish --dry-run -p <crate>` for each in dependency order.
 
 ### Author identity
-- [ ] Replace placeholder `Max <max@coop.local>` git identity with Max's real GitHub-verified email before first push.
+- [x] Use GitHub-verified DCO identity for public commits.
 
 ---
 
@@ -133,7 +135,7 @@ gh release create v0.1.0-alpha \
 Crate publication order (dependency-first):
 1. `coopd-core`
 2. `coopd-storage`, `coopd-vault`, `coopd-tools`, `coopd-brain` (parallel)
-3. `coopd` (with `default-features` only — market feature is off by default)
+3. `coopd`
 4. `coop-cli`
 
 > **Note:** `coopd-market` is **NOT** published to crates.io (open-core proprietary).
@@ -152,10 +154,7 @@ Crate publication order (dependency-first):
 
 ---
 
-## 7. The one decision still needing Max
+## 7. Repository ownership — resolved
 
-> **Create the `coop-network` GitHub org and confirm Max wants to be the owner?**
->
-> Verified available via GitHub API today. Alternative orgs available if Max prefers: `coop-os`, `coop-farm`. (`coopnet`, `coop-ai`, `henhouse` are all taken.)
-
-Everything else is decided. Once Max says "go", I execute §3 → §4 → §5.
+The public repository launched at `github.com/dcluomax/coop`. Moving it to a
+dedicated organization is optional and does not block releases or adoption.

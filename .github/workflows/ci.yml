@@ -25,6 +25,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: fmt check
         run: cargo fmt --all -- --check
+      - name: open-core boundary
+        run: ./scripts/check-open-core-boundary.sh
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test

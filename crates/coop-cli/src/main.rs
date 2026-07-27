@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
+use coopd_core::{AgentManifest, NetPolicy, NetworkSpec, manifest::MemorySpec};
 use serde_json::Value;
 use tracing_subscriber::EnvFilter;
 
@@ -104,6 +105,18 @@ enum HenCmd {
     Create {
         /// Path to manifest YAML.
         file: PathBuf,
+    },
+    /// Create and hatch a ready-to-work starter Hen without writing YAML.
+    Starter {
+        /// Local Hen name (the id becomes `local.coop/<name>`).
+        #[arg(default_value = "aria")]
+        name: String,
+        /// Vault/Azure secret reference containing the Anthropic API key.
+        #[arg(long, default_value = "vault:byok-anthropic")]
+        provider_id: String,
+        /// Anthropic model available to your account.
+        #[arg(long, default_value = "claude-sonnet-4-5-20250929")]
+        model: String,
     },
     /// Hatch (boot) a hen.
     Hatch {
@@ -264,17 +277,28 @@ async fn hen_cmd(api: &str, token: &str, cmd: HenCmd) -> Result<()> {
         HenCmd::Create { file } => {
             let yaml = std::fs::read_to_string(&file)
                 .with_context(|| format!("reading {}", file.display()))?;
-            let resp = auth(client.post(format!("{api}/api/v1/hens")), token)
-                .header("content-type", "application/yaml")
-                .body(yaml)
-                .send()
-                .await?;
-            let status = resp.status();
-            let body: Value = resp.json().await?;
-            if !status.is_success() {
-                bail!("create failed ({status}): {body}");
-            }
-            println!("{}", serde_json::to_string_pretty(&body)?);
+            let id = create_hen(&client, api, token, yaml).await?;
+            println!("{}", serde_json::to_string_pretty(&Value::String(id))?);
+        }
+        HenCmd::Starter {
+            name,
+            provider_id,
+            model,
+        } => {
+            ensure_provider_ready(&client, api, token, &provider_id).await?;
+            let manifest = starter_manifest(name, provider_id, model);
+            manifest
+                .validate()
+                .context("generated starter manifest is invalid")?;
+            let yaml = serde_yaml::to_string(&manifest)?;
+            let id = create_hen(&client, api, token, yaml).await?;
+            hen_action(&client, api, token, &id, "hatch")
+                .await
+                .with_context(|| format!("Hen `{id}` was created but could not hatch"))?;
+            println!("🐣 Hatched starter Hen `{id}`");
+            println!("   memory: 30 days · tools: bash, file_read, file_write");
+            println!("Next:");
+            println!("   coop job run {id} \"Create hello.txt with one useful idea\"");
         }
         HenCmd::Hatch { id } => simple_post(&client, api, token, &id, "hatch").await?,
         HenCmd::Sleep { id } => simple_post(&client, api, token, &id, "sleep").await?,
@@ -329,13 +353,102 @@ async fn hen_cmd(api: &str, token: &str, cmd: HenCmd) -> Result<()> {
     Ok(())
 }
 
-async fn simple_post(
+fn starter_manifest(name: String, provider_id: String, model: String) -> AgentManifest {
+    let mut manifest = AgentManifest::minimal(name);
+    manifest.brain.provider_id = provider_id;
+    manifest.brain.model = model;
+    manifest.memory = Some(MemorySpec {
+        episodic_retention_days: Some(30),
+        semantic_summarize_every: None,
+        inherit_from: None,
+    });
+    // Explicit `open` keeps the first-hatch path portable on hosts without an
+    // OS network sandbox. The starter has no HTTP tool; users can tighten the
+    // policy when they add networked tools.
+    manifest.network = Some(NetworkSpec {
+        policy: NetPolicy::Open,
+        allow: vec![],
+    });
+    manifest
+}
+
+async fn ensure_provider_ready(
+    client: &reqwest::Client,
+    api: &str,
+    token: &str,
+    provider_id: &str,
+) -> Result<()> {
+    let Some(secret_name) = provider_id.strip_prefix("vault:") else {
+        if provider_id.starts_with("azure-kv://") {
+            return Ok(());
+        }
+        bail!(
+            "starter --provider-id must be `vault:<secret-name>` or `azure-kv://<vault>/<secret>`"
+        );
+    };
+
+    let status_resp = auth(client.get(format!("{api}/api/v1/vault/status")), token)
+        .send()
+        .await?;
+    let status_code = status_resp.status();
+    let status: Value = status_resp.json().await?;
+    if !status_code.is_success() {
+        bail!("vault status failed ({status_code}): {status}");
+    }
+    if status.get("unlocked").and_then(Value::as_bool) != Some(true) {
+        bail!(
+            "vault is locked; start coopd with COOP_VAULT and COOP_PASSPHRASE before hatching a starter Hen"
+        );
+    }
+
+    let secrets_resp = auth(client.get(format!("{api}/api/v1/vault/secrets")), token)
+        .send()
+        .await?;
+    let secrets_code = secrets_resp.status();
+    let secrets: Value = secrets_resp.json().await?;
+    if !secrets_code.is_success() {
+        bail!("vault secret list failed ({secrets_code}): {secrets}");
+    }
+    let found = secrets
+        .get("names")
+        .and_then(Value::as_array)
+        .is_some_and(|names| names.iter().any(|name| name.as_str() == Some(secret_name)));
+    if !found {
+        bail!(
+            "vault secret `{secret_name}` is missing; store it with `COOP_SECRET_VALUE=... coop vault put <vault-path> {secret_name}`"
+        );
+    }
+    Ok(())
+}
+
+async fn create_hen(
+    client: &reqwest::Client,
+    api: &str,
+    token: &str,
+    yaml: String,
+) -> Result<String> {
+    let resp = auth(client.post(format!("{api}/api/v1/hens")), token)
+        .header("content-type", "application/yaml")
+        .body(yaml)
+        .send()
+        .await?;
+    let status = resp.status();
+    let body: Value = resp.json().await?;
+    if !status.is_success() {
+        bail!("create failed ({status}): {body}");
+    }
+    body.as_str()
+        .map(str::to_string)
+        .context("create response did not contain a Hen id")
+}
+
+async fn hen_action(
     client: &reqwest::Client,
     api: &str,
     token: &str,
     id: &str,
     action: &str,
-) -> Result<()> {
+) -> Result<Value> {
     let resp = auth(
         client.post(format!("{api}/api/v1/hens/{}/{action}", enc(id))),
         token,
@@ -347,6 +460,17 @@ async fn simple_post(
     if !status.is_success() {
         bail!("{action} failed ({status}): {body}");
     }
+    Ok(body)
+}
+
+async fn simple_post(
+    client: &reqwest::Client,
+    api: &str,
+    token: &str,
+    id: &str,
+    action: &str,
+) -> Result<()> {
+    let body = hen_action(client, api, token, id, action).await?;
     println!("{}", serde_json::to_string_pretty(&body)?);
     Ok(())
 }
@@ -436,4 +560,64 @@ async fn vault_cmd(cmd: VaultCmd) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn starter_manifest_is_valid_and_experience_ready() {
+        let manifest = starter_manifest(
+            "pepper".to_string(),
+            "vault:my-key".to_string(),
+            "claude-test".to_string(),
+        );
+
+        manifest.validate().unwrap();
+        assert_eq!(manifest.name, "pepper");
+        assert_eq!(manifest.brain.provider_id, "vault:my-key");
+        assert_eq!(manifest.brain.model, "claude-test");
+        assert_eq!(manifest.tools, ["bash", "file_read", "file_write"]);
+        assert_eq!(
+            manifest
+                .memory
+                .as_ref()
+                .and_then(|m| m.episodic_retention_days),
+            Some(30)
+        );
+        assert_eq!(
+            manifest.network.as_ref().map(|n| n.policy),
+            Some(NetPolicy::Open)
+        );
+    }
+
+    #[test]
+    fn starter_command_defaults_to_aria() {
+        let cli = Cli::try_parse_from(["coop", "hen", "starter"]).unwrap();
+        match cli.cmd {
+            Cmd::Hen {
+                cmd:
+                    HenCmd::Starter {
+                        name,
+                        provider_id,
+                        model,
+                    },
+            } => {
+                assert_eq!(name, "aria");
+                assert_eq!(provider_id, "vault:byok-anthropic");
+                assert_eq!(model, "claude-sonnet-4-5-20250929");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn starter_rejects_provider_scheme_it_cannot_run() {
+        let err = ensure_provider_ready(&reqwest::Client::new(), "http://127.0.0.1:1", "", "none")
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("must be `vault:<secret-name>`"));
+    }
 }
