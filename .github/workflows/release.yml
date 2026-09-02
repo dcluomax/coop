@@ -134,7 +134,7 @@ jobs:
           "$h  ${{ steps.stage.outputs.stage }}.zip" | Out-File -Encoding ascii "${{ steps.stage.outputs.stage }}.zip.sha256"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ steps.stage.outputs.stage }}
           path: |
@@ -163,13 +163,13 @@ jobs:
           fi
 
       - name: Download Apple Silicon build
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: coop-${{ steps.ver.outputs.tag }}-aarch64-apple-darwin
           path: arm64
 
       - name: Download Intel build
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: coop-${{ steps.ver.outputs.tag }}-x86_64-apple-darwin
           path: x86
@@ -193,7 +193,7 @@ jobs:
           tar -czf "$stage.tar.gz" "$stage"
           shasum -a 256 "$stage.tar.gz" > "$stage.tar.gz.sha256"
 
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: coop-${{ steps.ver.outputs.tag }}-universal-apple-darwin
           path: |
@@ -250,7 +250,7 @@ jobs:
           mkdir -p debout
           cp target/${{ matrix.target }}/debian/*.deb debout/
           ls -la debout/
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: coop-deb-${{ matrix.debarch }}
           path: debout/*.deb
@@ -264,7 +264,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           path: dist
       - name: Flatten artifacts
