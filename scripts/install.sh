@@ -69,22 +69,21 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 say "Downloading $asset"
 $DL_O "$tmp/$asset"        "$base/$asset"        || die "download failed: $base/$asset"
-$DL_O "$tmp/$asset.sha256" "$base/$asset.sha256" || warn "no checksum published; skipping verification"
+$DL_O "$tmp/$asset.sha256" "$base/$asset.sha256" || die "checksum download failed: $base/$asset.sha256"
 
-if [ -s "$tmp/$asset.sha256" ]; then
-  say "Verifying SHA-256 checksum"
-  expected="$(awk '{print $1}' "$tmp/$asset.sha256")"
-  if command -v sha256sum >/dev/null 2>&1; then
-    actual="$(sha256sum "$tmp/$asset" | awk '{print $1}')"
-  elif command -v shasum >/dev/null 2>&1; then
-    actual="$(shasum -a 256 "$tmp/$asset" | awk '{print $1}')"
-  else
-    actual=""; warn "no sha256sum/shasum available; skipping verification"
-  fi
-  if [ -n "$actual" ] && [ "$expected" != "$actual" ]; then
-    die "checksum mismatch! expected $expected, got $actual"
-  fi
+[ -s "$tmp/$asset.sha256" ] || die "published checksum is empty"
+grep -Eq '^[0-9a-fA-F]{64}[[:space:]]' "$tmp/$asset.sha256" \
+  || die "published checksum is malformed"
+say "Verifying SHA-256 checksum"
+expected="$(awk '{print tolower($1)}' "$tmp/$asset.sha256")"
+if command -v sha256sum >/dev/null 2>&1; then
+  actual="$(sha256sum "$tmp/$asset" | awk '{print tolower($1)}')"
+elif command -v shasum >/dev/null 2>&1; then
+  actual="$(shasum -a 256 "$tmp/$asset" | awk '{print tolower($1)}')"
+else
+  die "need sha256sum or shasum to verify the release"
 fi
+[ "$expected" = "$actual" ] || die "checksum mismatch! expected $expected, got $actual"
 
 # --- Extract ----------------------------------------------------------------
 say "Extracting"

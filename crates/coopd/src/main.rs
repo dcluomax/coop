@@ -174,6 +174,20 @@ async fn serve(data_dir: PathBuf, addr: String) -> Result<()> {
     let task_svc = tasks::TaskService::new(orch.clone());
 
     let auth_cfg = auth::AuthConfig::from_env();
+    let public_mode = std::env::var("COOP_PUBLIC").ok().as_deref() == Some("1");
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .with_context(|| format!("binding {addr}"))?;
+    let local_addr = listener.local_addr().context("reading bound address")?;
+    if public_mode && !auth_cfg.enabled() {
+        anyhow::bail!("COOP_PUBLIC=1 requires COOP_API_TOKEN");
+    }
+    if public_mode {
+        safe_origin::configured_public_origin().map_err(anyhow::Error::msg)?;
+    }
+    if !local_addr.ip().is_loopback() && !public_mode {
+        anyhow::bail!("non-loopback bind {local_addr} requires COOP_PUBLIC=1 and COOP_API_TOKEN");
+    }
     if auth_cfg.enabled() {
         info!("api auth enabled (COOP_API_TOKEN set)");
     } else {
@@ -187,9 +201,6 @@ async fn serve(data_dir: PathBuf, addr: String) -> Result<()> {
     // refuse cross-origin POSTs).
     let app = app.layer(axum::middleware::from_fn(safe_origin::require_safe_origin));
 
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .with_context(|| format!("binding {addr}"))?;
     info!(%addr, "coopd listening");
 
     // ConnectInfo carries the peer SocketAddr so the login throttle can key on

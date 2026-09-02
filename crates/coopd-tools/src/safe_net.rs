@@ -9,7 +9,7 @@
 //! open-redirect-into-localhost pivots.
 
 use coopd_core::{CoreError, Result};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 /// Maximum redirect hops we will follow.
 pub const MAX_REDIRECTS: usize = 3;
@@ -70,7 +70,7 @@ fn is_v6_documentation(v6: Ipv6Addr) -> bool {
 /// Returns [`CoreError::Other`] if the URL scheme is not http/https, the
 /// host cannot be parsed/resolved, or any resolved IP is in a disallowed
 /// range (loopback, RFC1918, link-local, ULA, etc.).
-pub async fn validate_url(url: &str) -> Result<()> {
+pub async fn resolve_public_url(url: &str) -> Result<(String, Vec<SocketAddr>)> {
     let parsed =
         reqwest::Url::parse(url).map_err(|e| CoreError::Other(format!("invalid url: {e}")))?;
     let scheme = parsed.scheme();
@@ -87,19 +87,28 @@ pub async fn validate_url(url: &str) -> Result<()> {
         .await
         .map_err(|e| CoreError::Other(format!("dns lookup {host}: {e}")))?;
 
-    let mut any = false;
+    let mut resolved = Vec::new();
     for sa in addrs {
-        any = true;
         if is_disallowed_ip(sa.ip()) {
             return Err(CoreError::Other(format!(
                 "ssrf: refusing connection to disallowed address {sa}"
             )));
         }
+        resolved.push(sa);
     }
-    if !any {
+    if resolved.is_empty() {
         return Err(CoreError::Other(format!("dns: no addresses for {host}")));
     }
-    Ok(())
+    Ok((host.to_string(), resolved))
+}
+
+/// Validate that `url` resolves only to public addresses.
+///
+/// # Errors
+///
+/// Returns the same errors as [`resolve_public_url`].
+pub async fn validate_url(url: &str) -> Result<()> {
+    resolve_public_url(url).await.map(|_| ())
 }
 
 /// Enforce a per-hen [`ResolvedNetPolicy`](coopd_core::ResolvedNetPolicy)

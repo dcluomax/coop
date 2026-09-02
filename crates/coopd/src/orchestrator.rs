@@ -373,9 +373,8 @@ async fn run(
                 limit,
                 reply,
             } => {
-                let res = store
-                    .list_memories(&hen_id, limit)
-                    .map_err(map_storage_err);
+                let res = prune_expired_memories(&store, &hen_id)
+                    .and_then(|_| store.list_memories(&hen_id, limit).map_err(map_storage_err));
                 let _ = reply.send(res);
             }
             OrchCmd::ForgetMemories { hen_id, reply } => {
@@ -485,6 +484,7 @@ fn handle_create(
         match HenId::parse(&parent_ref) {
             Ok(parent_id) => match store.get_hen(&parent_id) {
                 Ok(parent) => {
+                    prune_expired_memories(store, &parent_id)?;
                     let inherited = store
                         .list_memories(&parent_id, None)
                         .map_err(map_storage_err)?;
@@ -544,26 +544,33 @@ fn handle_record_memory(
         hen_id: hen_id.clone(),
         entry_id,
     });
-    // Enforce episodic retention (governance): drop episodes older than the
-    // manifest's window. Missing/zero retention keeps memory indefinitely.
-    if let Ok(hen) = store.get_hen(&hen_id)
-        && let Some(days) = hen
-            .manifest
-            .memory
-            .as_ref()
-            .and_then(|m| m.episodic_retention_days)
-        && days > 0
-    {
-        let cutoff = time::OffsetDateTime::now_utc() - time::Duration::days(i64::from(days));
-        match store.prune_memories(&hen_id, cutoff) {
-            Ok(n) if n > 0 => {
-                info!(%hen_id, pruned = n, retention_days = days, "pruned expired memories")
-            }
-            Ok(_) => {}
-            Err(e) => warn!(%hen_id, error = %e, "memory prune failed"),
-        }
+    if let Err(e) = prune_expired_memories(store, &hen_id) {
+        warn!(%hen_id, error = %e, "memory prune failed");
     }
     Ok(())
+}
+
+fn prune_expired_memories(store: &Store, hen_id: &HenId) -> CoreResult<usize> {
+    let hen = store.get_hen(hen_id).map_err(map_storage_err)?;
+    let Some(days) = hen
+        .manifest
+        .memory
+        .as_ref()
+        .and_then(|m| m.episodic_retention_days)
+        .filter(|days| *days > 0)
+    else {
+        return Ok(0);
+    };
+    let cutoff = time::OffsetDateTime::now_utc()
+        .checked_sub(time::Duration::days(i64::from(days)))
+        .ok_or_else(|| CoreError::Other("memory retention cutoff is out of range".into()))?;
+    let pruned = store
+        .prune_memories(hen_id, cutoff)
+        .map_err(map_storage_err)?;
+    if pruned > 0 {
+        info!(%hen_id, pruned, retention_days = days, "pruned expired memories");
+    }
+    Ok(pruned)
 }
 
 fn handle_delete(
@@ -737,4 +744,101 @@ fn handle_dispatch_next(
         job,
     );
     Ok(Some(job_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use coopd_core::{MemoryOutcome, manifest::MemorySpec};
+    use tempfile::tempdir;
+
+    #[test]
+    fn expired_memory_is_pruned_before_reads() {
+        let dir = tempdir().unwrap();
+        let store = Store::open(dir.path().join("state.redb")).unwrap();
+        let coop_id = CoopId::new("local.coop").unwrap();
+        let hen_id = HenId::new(&coop_id, "aria").unwrap();
+        let mut manifest = AgentManifest::minimal("aria".into());
+        manifest.memory = Some(MemorySpec {
+            episodic_retention_days: Some(30),
+            semantic_summarize_every: None,
+            inherit_from: None,
+        });
+        store.put_hen(&Hen::new(hen_id.clone(), manifest)).unwrap();
+
+        let mut expired = MemoryEntry::new(
+            hen_id.clone(),
+            "job-old".into(),
+            "old prompt",
+            "old result",
+            1,
+            MemoryOutcome::Done,
+        );
+        expired.at = time::OffsetDateTime::now_utc() - time::Duration::days(31);
+        store.put_memory(&expired).unwrap();
+        store
+            .put_memory(&MemoryEntry::new(
+                hen_id.clone(),
+                "job-new".into(),
+                "new prompt",
+                "new result",
+                1,
+                MemoryOutcome::Done,
+            ))
+            .unwrap();
+
+        assert_eq!(prune_expired_memories(&store, &hen_id).unwrap(), 1);
+        let kept = store.list_memories(&hen_id, None).unwrap();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].job_id, "job-new");
+    }
+
+    #[test]
+    fn inheritance_excludes_expired_parent_memory() {
+        let dir = tempdir().unwrap();
+        let store = Store::open(dir.path().join("state.redb")).unwrap();
+        let coop_id = CoopId::new("local.coop").unwrap();
+        let parent_id = HenId::new(&coop_id, "parent").unwrap();
+        let mut parent_manifest = AgentManifest::minimal("parent".into());
+        parent_manifest.memory = Some(MemorySpec {
+            episodic_retention_days: Some(30),
+            semantic_summarize_every: None,
+            inherit_from: None,
+        });
+        store
+            .put_hen(&Hen::new(parent_id.clone(), parent_manifest))
+            .unwrap();
+        let mut expired = MemoryEntry::new(
+            parent_id.clone(),
+            "job-old".into(),
+            "old",
+            "old",
+            1,
+            MemoryOutcome::Done,
+        );
+        expired.at = time::OffsetDateTime::now_utc() - time::Duration::days(31);
+        store.put_memory(&expired).unwrap();
+        store
+            .put_memory(&MemoryEntry::new(
+                parent_id.clone(),
+                "job-new".into(),
+                "new",
+                "new",
+                1,
+                MemoryOutcome::Done,
+            ))
+            .unwrap();
+
+        let mut child_manifest = AgentManifest::minimal("child".into());
+        child_manifest.memory = Some(MemorySpec {
+            episodic_retention_days: None,
+            semantic_summarize_every: None,
+            inherit_from: Some(parent_id.to_string()),
+        });
+        let (events, _) = broadcast::channel(8);
+        let child_id = handle_create(&store, &coop_id, child_manifest, &events).unwrap();
+        let inherited = store.list_memories(&child_id, None).unwrap();
+        assert_eq!(inherited.len(), 1);
+        assert_eq!(inherited[0].job_id, "job-new");
+    }
 }

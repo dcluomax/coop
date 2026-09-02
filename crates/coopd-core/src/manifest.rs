@@ -229,6 +229,15 @@ fn validate_brain_provider(ctx: &str, provider: &str, base_url: Option<&str>) ->
     }
 }
 
+fn validate_provider_id(ctx: &str, provider: &str, provider_id: &str) -> Result<()> {
+    if provider_id == "none" && provider != "openai-compat" {
+        return Err(CoreError::InvalidManifest(format!(
+            "{ctx}.provider_id=none is allowed only for provider openai-compat"
+        )));
+    }
+    Ok(())
+}
+
 /// Brain capability requirements.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BrainCapsRequired {
@@ -281,6 +290,9 @@ pub struct MemorySpec {
     #[serde(default)]
     pub inherit_from: Option<String>,
 }
+
+/// Maximum accepted episodic retention window (100 years).
+pub const MAX_EPISODIC_RETENTION_DAYS: u32 = 36_500;
 
 /// Resource request/limit.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -498,6 +510,7 @@ impl AgentManifest {
                 &self.brain.provider,
                 self.brain.base_url.as_deref(),
             )?;
+            validate_provider_id("brain", &self.brain.provider, &self.brain.provider_id)?;
 
             // Each declared fallback is a full brain spec and must validate the
             // same way as the primary.
@@ -517,7 +530,22 @@ impl AgentManifest {
                     &fb.provider,
                     fb.base_url.as_deref(),
                 )?;
+                validate_provider_id(
+                    &format!("brain.fallbacks[{i}]"),
+                    &fb.provider,
+                    &fb.provider_id,
+                )?;
             }
+        }
+        if let Some(days) = self
+            .memory
+            .as_ref()
+            .and_then(|memory| memory.episodic_retention_days)
+            && days > MAX_EPISODIC_RETENTION_DAYS
+        {
+            return Err(CoreError::InvalidManifest(format!(
+                "memory.episodic_retention_days must be at most {MAX_EPISODIC_RETENTION_DAYS}"
+            )));
         }
         // Leasing safety: if this hen is offered for lease and the owner
         // hasn't explicitly disabled the framework requirement, refuse the
@@ -601,6 +629,43 @@ tools: [bash]
 "#;
         let m = AgentManifest::parse_yaml(yaml).unwrap();
         assert_eq!(m.brain.provider, "openai");
+    }
+
+    #[test]
+    fn keyless_provider_id_is_only_for_openai_compat() {
+        let yaml = r#"
+spec_version: coop/v1
+name: unsafe
+brain:
+  provider_id: none
+  provider: anthropic
+  model: claude-test
+tools: [bash]
+"#;
+        let error = AgentManifest::parse_yaml(yaml).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("allowed only for provider openai-compat")
+        );
+    }
+
+    #[test]
+    fn retention_window_is_bounded() {
+        let yaml = format!(
+            r#"
+spec_version: coop/v1
+name: oldhen
+brain:
+  provider_id: vault:key
+  model: test
+memory:
+  episodic_retention_days: {}
+"#,
+            MAX_EPISODIC_RETENTION_DAYS + 1
+        );
+        let error = AgentManifest::parse_yaml(&yaml).unwrap_err();
+        assert!(error.to_string().contains("must be at most"));
     }
 
     #[test]

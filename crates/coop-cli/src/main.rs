@@ -285,12 +285,12 @@ async fn hen_cmd(api: &str, token: &str, cmd: HenCmd) -> Result<()> {
             provider_id,
             model,
         } => {
-            ensure_provider_ready(&client, api, token, &provider_id).await?;
             let manifest = starter_manifest(name, provider_id, model);
             manifest
                 .validate()
                 .context("generated starter manifest is invalid")?;
             let yaml = serde_yaml::to_string(&manifest)?;
+            ensure_provider_ready(&client, api, token, &yaml).await?;
             let id = create_hen(&client, api, token, yaml).await?;
             hen_action(&client, api, token, &id, "hatch")
                 .await
@@ -376,47 +376,21 @@ async fn ensure_provider_ready(
     client: &reqwest::Client,
     api: &str,
     token: &str,
-    provider_id: &str,
+    manifest_yaml: &str,
 ) -> Result<()> {
-    let Some(secret_name) = provider_id.strip_prefix("vault:") else {
-        if provider_id.starts_with("azure-kv://") {
-            return Ok(());
-        }
-        bail!(
-            "starter --provider-id must be `vault:<secret-name>` or `azure-kv://<vault>/<secret>`"
-        );
-    };
-
-    let status_resp = auth(client.get(format!("{api}/api/v1/vault/status")), token)
+    let resp = auth(client.post(format!("{api}/api/v1/hens/preflight")), token)
+        .header("content-type", "application/yaml")
+        .body(manifest_yaml.to_string())
         .send()
         .await?;
-    let status_code = status_resp.status();
-    let status: Value = status_resp.json().await?;
-    if !status_code.is_success() {
-        bail!("vault status failed ({status_code}): {status}");
-    }
-    if status.get("unlocked").and_then(Value::as_bool) != Some(true) {
-        bail!(
-            "vault is locked; start coopd with COOP_VAULT and COOP_PASSPHRASE before hatching a starter Hen"
-        );
-    }
-
-    let secrets_resp = auth(client.get(format!("{api}/api/v1/vault/secrets")), token)
-        .send()
-        .await?;
-    let secrets_code = secrets_resp.status();
-    let secrets: Value = secrets_resp.json().await?;
-    if !secrets_code.is_success() {
-        bail!("vault secret list failed ({secrets_code}): {secrets}");
-    }
-    let found = secrets
-        .get("names")
-        .and_then(Value::as_array)
-        .is_some_and(|names| names.iter().any(|name| name.as_str() == Some(secret_name)));
-    if !found {
-        bail!(
-            "vault secret `{secret_name}` is missing; store it with `COOP_SECRET_VALUE=... coop vault put <vault-path> {secret_name}`"
-        );
+    let status = resp.status();
+    let body: Value = resp.json().await?;
+    if !status.is_success() {
+        let message = body
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("provider is not ready");
+        bail!("{message}");
     }
     Ok(())
 }
@@ -613,11 +587,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn starter_rejects_provider_scheme_it_cannot_run() {
-        let err = ensure_provider_ready(&reqwest::Client::new(), "http://127.0.0.1:1", "", "none")
+    async fn starter_preflight_surfaces_connection_errors() {
+        let manifest = starter_manifest(
+            "aria".into(),
+            "unsupported:key".into(),
+            "claude-test".into(),
+        );
+        let yaml = serde_yaml::to_string(&manifest).unwrap();
+        let err = ensure_provider_ready(&reqwest::Client::new(), "http://127.0.0.1:1", "", &yaml)
             .await
             .unwrap_err();
 
-        assert!(err.to_string().contains("must be `vault:<secret-name>`"));
+        assert!(err.to_string().contains("error sending request"));
     }
 }

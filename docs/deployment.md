@@ -3,9 +3,9 @@
 Three supported ways to run `coopd` beyond a foreground `coopd serve &`.
 
 > ⚠️ **Before exposing Coop beyond `127.0.0.1`** set `COOP_API_TOKEN` (bearer
-> auth) **and** `COOP_PUBLIC=1` (accept non-loopback `Host`/`Origin`). Without
-> the token you expose an unauthenticated farm; without `COOP_PUBLIC=1` every
-> non-loopback request is rejected. See [configuration.md](./configuration.md).
+> auth), `COOP_PUBLIC=1`, and the exact `COOP_PUBLIC_ORIGIN`. The daemon refuses
+> public mode or a non-loopback bind when these safeguards are incomplete. See
+> [configuration.md](./configuration.md).
 
 ## Install
 
@@ -20,7 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/dcluomax/coop/main/scripts/install.
 sudo apt install ./coop_<version>_<arch>.deb   # pulls in bubblewrap + tmux,
                                                # installs the coopd systemd unit
 
-# Source (any platform with Rust 1.85+)
+# Source (any platform with Rust 1.91.1+)
 git clone https://github.com/dcluomax/coop.git
 cd coop
 cargo install --path crates/coopd
@@ -39,6 +39,7 @@ docker run -d --name coopd \
   -p 9700:9700 \
   -v coop-data:/data \
   -e COOP_PUBLIC=1 \
+  -e COOP_PUBLIC_ORIGIN=http://localhost:9700 \
   -e COOP_API_TOKEN="$(openssl rand -hex 32)" \
   coop
 ```
@@ -50,6 +51,7 @@ sessions); data persists in the `coop-data` volume.
 
 ```bash
 export COOP_API_TOKEN=$(openssl rand -hex 32)
+export COOP_PUBLIC_ORIGIN=http://localhost:9700
 docker compose up -d
 docker compose logs -f
 ```
@@ -95,10 +97,11 @@ Fronting `coopd` with nginx, Caddy, or a Cloudflare/`cloudflared` tunnel
    #   networks: [default, <proxy-net>]
    ```
 
-2. **Set `COOP_PUBLIC=1`.** The proxy forwards a public `Host`/`Origin`
+2. **Set `COOP_PUBLIC=1` and the exact `COOP_PUBLIC_ORIGIN`.** The proxy forwards a public `Host`/`Origin`
    (e.g. `farm.example.com`), which the loopback allowlist rejects with `403`
-   until you opt in. Keep `COOP_API_TOKEN` set — `COOP_PUBLIC=1` only relaxes
-   the `Host`/`Origin` check, it does **not** disable auth.
+   until you opt in. For example, set
+   `COOP_PUBLIC_ORIGIN=https://farm.example.com`. The daemon refuses to start
+   unless both that exact origin and `COOP_API_TOKEN` are set.
 
 The public hostname also needs a DNS record pointing at the proxy/tunnel; a
 missing record surfaces as `NXDOMAIN` / connection failures, not a `coopd`
@@ -107,12 +110,12 @@ error. Verify the chain end to end:
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' https://farm.example.com/api/v1/healthz   # 200 (exempt)
 curl -s -o /dev/null -w '%{http_code}\n' https://farm.example.com/                 # 401 (auth works)
-curl -s -o /dev/null -w '%{http_code}\n' "https://farm.example.com/?token=$TOKEN"  # 200 (UI loads)
+open https://farm.example.com/login  # authenticate once; the UI then uses an HttpOnly cookie
 ```
 
 ## Reaching the farm from other devices
 
-Once bound to `0.0.0.0` with `COOP_PUBLIC=1` + a token, open the Farm UI, click
+Once bound to `0.0.0.0` with public mode, its exact origin, and a token, open the Farm UI, click
 ⚙️, and the **📍 Farm location** panel lists every reachable URL. The same data
 is at `GET /api/v1/farm/location`:
 

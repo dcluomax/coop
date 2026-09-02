@@ -1,11 +1,12 @@
 # Coop daemon — one-command deploy.
 #
-#   COOP_API_TOKEN=$(openssl rand -hex 32) docker compose up -d
+#   COOP_API_TOKEN=$(openssl rand -hex 32) \
+#   COOP_PUBLIC_ORIGIN=http://localhost:9700 docker compose up -d
 #
 # Data (sealed vault, redb state, hen workdirs) persists in the `coop-data`
 # volume. The daemon binds 0.0.0.0 inside the container; COOP_PUBLIC=1 lets it
-# accept the non-loopback Host header the published port arrives with — so you
-# MUST set COOP_API_TOKEN or you'll expose an unauthenticated farm.
+# accept the published Host only when it matches COOP_PUBLIC_ORIGIN. The daemon
+# refuses public mode unless both the origin and COOP_API_TOKEN are set.
 services:
   coopd:
     build: .
@@ -19,6 +20,7 @@ services:
     environment:
       COOP_DATA_DIR: /data
       COOP_PUBLIC: "1"
+      COOP_PUBLIC_ORIGIN: "${COOP_PUBLIC_ORIGIN:?set COOP_PUBLIC_ORIGIN, e.g. http://localhost:9700}"
       # REQUIRED. Generate once: openssl rand -hex 32
       COOP_API_TOKEN: "${COOP_API_TOKEN:?set COOP_API_TOKEN before starting}"
       # Optional: auto-unlock a vault baked into the volume.

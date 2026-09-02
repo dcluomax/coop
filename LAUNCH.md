@@ -13,7 +13,7 @@
 |---|---|---|
 | **LoC** | ~14.1K Rust | `find crates -name '*.rs' ...` |
 | **Crates** | 8 OSS crates (including `coopd-discord`); proprietary cross-farm layer remains separate | `Cargo.toml`, `AGENTS.md` |
-| **Tests** | 170 unit tests, all green | `cargo test --workspace` |
+| **Tests** | 178 unit tests, all green | `cargo test --workspace` |
 | **E2E** | Mock lifecycle, memory, delegation, PTY, events, and restart recovery passing | `scripts/e2e.sh` |
 | **Demos** | Farm UI demo + lifecycle E2E | `scripts/farm-demo.sh`, `scripts/e2e.sh` |
 | **CI** | ubuntu + macos matrix, fmt + clippy + test + doc + e2e | `.github/workflows/ci.yml` |
@@ -135,8 +135,9 @@ gh release create v0.1.0-alpha \
 Crate publication order (dependency-first):
 1. `coopd-core`
 2. `coopd-storage`, `coopd-vault`, `coopd-tools`, `coopd-brain` (parallel)
-3. `coopd`
-4. `coop-cli`
+3. `coopd-discord` (currently `publish = false`; make publishable first)
+4. `coopd`
+5. `coop-cli`
 
 > **Note:** `coopd-market` is **NOT** published to crates.io (open-core proprietary).
 > See [AGENTS.md](./AGENTS.md) for the boundary contract.

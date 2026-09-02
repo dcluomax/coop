@@ -82,10 +82,10 @@ async fn run_job(
     // Persist an episodic memory of this job (success or failure) so the hen
     // continues from context next time. Retention pruning happens in the
     // orchestrator. Best-effort: memory is an enhancement, never fatal.
-    if let Some(entry) = coopd_core::MemoryEntry::from_job(&job) {
-        if let Err(e) = orch.record_memory(entry).await {
-            warn!(job_id = %job.id, error = %e, "failed to record episodic memory");
-        }
+    if let Some(entry) = coopd_core::MemoryEntry::from_job(&job)
+        && let Err(e) = orch.record_memory(entry).await
+    {
+        warn!(job_id = %job.id, error = %e, "failed to record episodic memory");
     }
 
     let _ = orch
@@ -259,21 +259,19 @@ async fn invoke_tool(
         coopd_core::LeaseStatus::LeasedOut { lease_id, .. }
         | coopd_core::LeaseStatus::LeasedIn { lease_id, .. } => Some(lease_id.clone()),
     };
-    if lease_id.is_some() {
-        if let Some(allow) = hen
+    if lease_id.is_some()
+        && let Some(allow) = hen
             .manifest
             .lease
             .as_ref()
             .and_then(|l| l.allowed_tools.as_ref())
-        {
-            if !allow.iter().any(|t| t == name) {
-                warn!(tool = name, %job.id, "lease policy denied tool call");
-                return (
-                    format!("ERROR: tool `{name}` is not permitted by the active lease policy"),
-                    true,
-                );
-            }
-        }
+        && !allow.iter().any(|t| t == name)
+    {
+        warn!(tool = name, %job.id, "lease policy denied tool call");
+        return (
+            format!("ERROR: tool `{name}` is not permitted by the active lease policy"),
+            true,
+        );
     }
     let Some(tool) = tools.get(name) else {
         return (format!("ERROR: unknown tool `{name}`"), true);

@@ -18,6 +18,7 @@ struct Input {
 fn default_max() -> usize {
     1024 * 1024
 }
+const MAX_READ_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Serialize)]
 struct Output {
@@ -64,19 +65,36 @@ impl CoopTool for FileRead {
     }
     async fn invoke(&self, ctx: &ToolCtx, input: Value) -> Result<Value> {
         let inp: Input = serde_json::from_value(input)?;
-        let p = crate::safe_path::safe_resolve(&ctx.workdir, &inp.path, true)?;
-        let bytes = tokio::fs::read(&p)
-            .await
-            .map_err(|e| CoreError::Io(format!("read {}: {e}", p.display())))?;
-        let truncated = bytes.len() > inp.max_bytes;
-        let slice = if truncated {
-            &bytes[..inp.max_bytes]
-        } else {
-            &bytes[..]
-        };
-        let content = String::from_utf8_lossy(slice).into_owned();
+        crate::safe_path::validate_relative_path(&inp.path)?;
+        let limit = inp.max_bytes.min(MAX_READ_BYTES);
+        let base = ctx.workdir.clone();
+        let user_path = inp.path.clone();
+        let (mut bytes, total_bytes) = tokio::task::spawn_blocking(move || {
+            use std::io::Read;
+
+            let dir = cap_std::fs::Dir::open_ambient_dir(&base, cap_std::ambient_authority())
+                .map_err(|e| CoreError::Io(format!("open workdir {}: {e}", base.display())))?;
+            let mut file = dir
+                .open(&user_path)
+                .map_err(|e| CoreError::Io(format!("open {user_path}: {e}")))?;
+            let total_bytes = file
+                .metadata()
+                .map_err(|e| CoreError::Io(format!("stat {user_path}: {e}")))?
+                .len();
+            let mut bytes = Vec::with_capacity(limit.min(64 * 1024));
+            file.by_ref()
+                .take(limit.saturating_add(1) as u64)
+                .read_to_end(&mut bytes)
+                .map_err(|e| CoreError::Io(format!("read {user_path}: {e}")))?;
+            Ok::<_, CoreError>((bytes, total_bytes))
+        })
+        .await
+        .map_err(|e| CoreError::Io(format!("file_read task: {e}")))??;
+        let truncated = total_bytes > limit as u64;
+        bytes.truncate(limit);
+        let content = String::from_utf8_lossy(&bytes).into_owned();
         Ok(serde_json::to_value(Output {
-            bytes: bytes.len(),
+            bytes: usize::try_from(total_bytes).unwrap_or(usize::MAX),
             truncated,
             content,
         })?)
@@ -136,5 +154,22 @@ mod tests {
             .await
             .unwrap_err();
         assert!(format!("{err}").contains(".."));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn descriptor_relative_open_rejects_symlink_escape() {
+        let dir = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        std::fs::write(outside.path().join("secret"), "secret").unwrap();
+        std::os::unix::fs::symlink(outside.path().join("secret"), dir.path().join("escape"))
+            .unwrap();
+        let ctx = crate::test_ctx(dir.path().to_path_buf());
+        assert!(
+            FileRead
+                .invoke(&ctx, json!({ "path": "escape" }))
+                .await
+                .is_err()
+        );
     }
 }

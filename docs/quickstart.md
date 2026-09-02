@@ -51,6 +51,11 @@ For full control over tools, personality, network policy, fallbacks, and
 inheritance, edit [`examples/aria.yaml`](../examples/aria.yaml) and use
 `coop hen create examples/aria.yaml`.
 
+CLI-hosted agents (`claude-code`, `codex`, and `gh-copilot`) require
+`network.policy: open` in v0.1 because their tmux sessions are not yet wrapped
+by the per-Hen network sandbox. Use the built-in `anthropic` agent kind when a
+strict `off` or `allowlist` policy is required.
+
 Open <http://127.0.0.1:9700/> to watch your hens in the Farm UI — click any hen
 to drop into a live PTY shell in its workdir.
 

@@ -15,9 +15,9 @@ members = [
 # per the open-core split. See AGENTS.md for the boundary contract.
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.0-alpha.3"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.91.1"
 license = "Apache-2.0"
 repository = "https://github.com/dcluomax/coop"
 homepage = "https://coop.network"
@@ -57,14 +57,14 @@ cloned_instead_of_copied = "warn"
 
 [workspace.dependencies]
 # Workspace-internal
-coopd-core = { path = "crates/coopd-core", version = "0.1.0" }
-coopd-storage = { path = "crates/coopd-storage", version = "0.1.0" }
-coopd-vault = { path = "crates/coopd-vault", version = "0.1.0" }
-coopd-tools = { path = "crates/coopd-tools", version = "0.1.0" }
-coopd-brain = { path = "crates/coopd-brain", version = "0.1.0" }
-coopd-discord = { path = "crates/coopd-discord", version = "0.1.0" }
+coopd-core = { path = "crates/coopd-core", version = "0.1.0-alpha.3" }
+coopd-storage = { path = "crates/coopd-storage", version = "0.1.0-alpha.3" }
+coopd-vault = { path = "crates/coopd-vault", version = "0.1.0-alpha.3" }
+coopd-tools = { path = "crates/coopd-tools", version = "0.1.0-alpha.3" }
+coopd-brain = { path = "crates/coopd-brain", version = "0.1.0-alpha.3" }
+coopd-discord = { path = "crates/coopd-discord", version = "0.1.0-alpha.3" }
 # coopd-market is intentionally NOT a workspace member (open-core: proprietary).
-# See crates/coopd/Cargo.toml for its optional, sibling-path declaration.
+# The public workspace has no dependency or feature hook for the private layer.
 
 # Async runtime
 tokio = { version = "1.40", features = ["full"] }
@@ -117,6 +117,8 @@ hex = "0.4"
 zeroize = { version = "1", features = ["derive"] }
 if-addrs = "0.13"
 portable-pty = "0.9"
+nix = { version = "0.29", features = ["signal", "process"] }
+cap-std = "3"
 
 # Testing
 mockall = "0.13"
