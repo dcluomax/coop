@@ -13,6 +13,7 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
 - The binary installer now fails closed when a release checksum is missing,
   malformed, or cannot be verified.
 - CI and release actions are pinned to immutable commit SHAs.
+- Updated `anyhow` to 1.0.104 to remove RUSTSEC-2026-0190.
 - Public mode and non-loopback binds now fail closed without bearer auth;
   browser origins must match the request host, opaque origins are rejected, and
   bearer tokens are no longer accepted from leak-prone URL query strings.
