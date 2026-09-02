@@ -223,10 +223,10 @@ impl Store {
         for entry in table.iter()? {
             let (_k, v) = entry?;
             let job: Job = serde_json::from_slice(v.value())?;
-            if let Some(h) = hen_id {
-                if &job.hen_id != h {
-                    continue;
-                }
+            if let Some(h) = hen_id
+                && &job.hen_id != h
+            {
+                continue;
             }
             out.push(job);
         }

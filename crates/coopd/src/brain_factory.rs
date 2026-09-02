@@ -127,7 +127,7 @@ impl BrainFactory {
         base_url: Option<&str>,
         auto_route: bool,
     ) -> Result<Arc<dyn BrainAdapter>> {
-        let api_key = self.resolve_key(provider_id).await?;
+        let api_key = self.resolve_key(provider, provider_id).await?;
         let adapter: Arc<dyn BrainAdapter> = match provider {
             "anthropic" if auto_route => {
                 let haiku: Arc<dyn BrainAdapter> =
@@ -156,25 +156,32 @@ impl BrainFactory {
     /// Resolve a `provider_id` to a plaintext API key from the appropriate
     /// secret backend. The sentinel `none` yields an empty key for keyless
     /// OpenAI-compatible local servers.
-    async fn resolve_key(&self, provider: &str) -> Result<String> {
-        if provider == "none" {
+    async fn resolve_key(&self, provider: &str, provider_id: &str) -> Result<String> {
+        if provider_id == "none" && provider == "openai-compat" {
             return Ok(String::new());
         }
-        if AzureSecretRef::matches(provider) {
+        if provider_id == "none" {
+            return Err(CoreError::Other(format!(
+                "provider_id=none is not allowed for provider {provider}"
+            )));
+        }
+        if AzureSecretRef::matches(provider_id) {
+            let reference = AzureSecretRef::parse(provider_id)
+                .map_err(|e| CoreError::Other(format!("azure key vault: {e}")))?;
             let kv = self
                 .azure
                 .get_or_try_init(AzureKeyVault::from_env)
                 .map_err(|e| CoreError::Other(format!("azure key vault: {e}")))?;
             let secret = kv
-                .resolve_reference(provider)
+                .get_secret(&reference)
                 .await
                 .map_err(|e| CoreError::Other(format!("azure key vault: {e}")))?;
             return Ok(secret.to_string());
         }
 
-        let secret_name = provider
+        let secret_name = provider_id
             .strip_prefix("vault:")
-            .ok_or_else(|| CoreError::Other(format!("unsupported provider_id: {provider}")))?;
+            .ok_or_else(|| CoreError::Other(format!("unsupported provider_id: {provider_id}")))?;
 
         let vault = self
             .vault

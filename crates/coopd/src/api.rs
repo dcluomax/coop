@@ -75,6 +75,7 @@ pub fn router(
         .route("/api/v1/session/capabilities", get(session_capabilities))
         .route("/api/v1/farm", get(farm))
         .route("/api/v1/hens", get(list_hens).post(create_hen))
+        .route("/api/v1/hens/preflight", post(preflight_hen))
         .route("/api/v1/hens/:id", get(get_hen).delete(delete_hen))
         .route("/api/v1/hens/:id/hatch", post(hatch_hen))
         .route("/api/v1/hens/:id/sleep", post(sleep_hen))
@@ -192,6 +193,20 @@ async fn create_hen(
     Ok((StatusCode::CREATED, Json(id)))
 }
 
+async fn preflight_hen(
+    State(orch): State<OrchHandle>,
+    body: String,
+) -> Result<Json<OkBody>, AppError> {
+    let manifest = AgentManifest::parse_yaml(&body)
+        .map_err(|e| AppError::bad_request(format!("invalid manifest: {e}")))?;
+    let factory = orch.brain_factory.lock().await;
+    factory
+        .build(&manifest)
+        .await
+        .map_err(|e| AppError::unprocessable(format!("provider preflight failed: {e}")))?;
+    Ok(Json(OkBody { ok: true }))
+}
+
 async fn get_hen(
     State(orch): State<OrchHandle>,
     Path(id): Path<String>,
@@ -219,28 +234,28 @@ async fn hatch_hen(
     // than `open` must run on a host that can enforce it. We refuse to hatch
     // rather than silently downgrade to open egress. See docs/net-isolation.md.
     let hen = orch.get_hen(id.clone()).await?;
-    if let Some(net) = &hen.manifest.network {
-        if net.policy.requires_enforcement() {
-            if !coopd_tools::sandbox::net_isolation_available() {
-                return Err(AppError::forbidden(format!(
-                    "refusing to hatch {id}: network policy `{}` cannot be enforced on this host \
+    if let Some(net) = &hen.manifest.network
+        && net.policy.requires_enforcement()
+    {
+        if !coopd_tools::sandbox::net_isolation_available() {
+            return Err(AppError::forbidden(format!(
+                "refusing to hatch {id}: network policy `{}` cannot be enforced on this host \
                      (no user namespaces / Seatbelt). Set network.policy: open to run without \
                      egress isolation, or run on a supported host.",
-                    net.policy.as_str()
-                )));
-            }
-            // tmux-hosted CLI agents are a network egress surface equal to bash
-            // but are not yet wrapped in the per-hen sandbox (v1 limitation).
-            // Fail closed for them under any strict policy.
-            if hen.manifest.agent_kind.is_tmux_agent() {
-                return Err(AppError::forbidden(format!(
-                    "refusing to hatch {id}: network policy `{}` is not yet enforceable for \
+                net.policy.as_str()
+            )));
+        }
+        // tmux-hosted CLI agents are a network egress surface equal to bash
+        // but are not yet wrapped in the per-hen sandbox (v1 limitation).
+        // Fail closed for them under any strict policy.
+        if hen.manifest.agent_kind.is_tmux_agent() {
+            return Err(AppError::forbidden(format!(
+                "refusing to hatch {id}: network policy `{}` is not yet enforceable for \
                      agent_kind `{}` (tmux CLI agents are an unconfined egress surface in v1). \
                      Use agent_kind: anthropic, or network.policy: open.",
-                    net.policy.as_str(),
-                    hen.manifest.agent_kind.as_str()
-                )));
-            }
+                net.policy.as_str(),
+                hen.manifest.agent_kind.as_str()
+            )));
         }
     }
     orch.transition_hen(id.clone(), HenState::Hatching).await?;
@@ -280,10 +295,10 @@ async fn submit_job(
     check_prompt_len(&body.prompt)?;
     // Topic filter: if the hen is currently leased and the manifest defines
     // a topic_filter, every prompt must pass it before dispatch.
-    if let Ok(hen) = orch.get_hen(id.clone()).await {
-        if let Err(reason) = enforce_lease_topic(&hen, &body.prompt) {
-            return Err(AppError::forbidden(reason));
-        }
+    if let Ok(hen) = orch.get_hen(id.clone()).await
+        && let Err(reason) = enforce_lease_topic(&hen, &body.prompt)
+    {
+        return Err(AppError::forbidden(reason));
     }
     let job_id = orch.submit_job(id, body.prompt).await?;
     Ok((
@@ -643,6 +658,12 @@ impl AppError {
     fn payload_too_large(msg: impl Into<String>) -> Self {
         Self {
             status: StatusCode::PAYLOAD_TOO_LARGE,
+            message: msg.into(),
+        }
+    }
+    fn unprocessable(msg: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UNPROCESSABLE_ENTITY,
             message: msg.into(),
         }
     }

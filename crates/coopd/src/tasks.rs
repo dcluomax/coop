@@ -77,11 +77,11 @@ impl TaskService {
     /// Cancel a pending task (no-op for already-dispatched ones).
     pub async fn cancel(&self, id: &str) -> bool {
         let mut g = self.inner.lock().await;
-        if let Some(t) = g.get_mut(id) {
-            if matches!(t.status, TaskStatus::Pending) {
-                t.mark_cancelled();
-                return true;
-            }
+        if let Some(t) = g.get_mut(id)
+            && matches!(t.status, TaskStatus::Pending)
+        {
+            t.mark_cancelled();
+            return true;
         }
         false
     }
@@ -100,12 +100,12 @@ impl TaskService {
             }
         }
         for (id, kind, prompt) in to_dispatch {
-            if let Some(hen_id) = self.find_match(kind).await {
-                if send_keys_to_hen(&self.orch, &hen_id, &prompt).await.is_ok() {
-                    let mut g = self.inner.lock().await;
-                    if let Some(t) = g.get_mut(&id) {
-                        t.mark_dispatched(hen_id);
-                    }
+            if let Some(hen_id) = self.find_match(kind).await
+                && send_keys_to_hen(&self.orch, &hen_id, &prompt).await.is_ok()
+            {
+                let mut g = self.inner.lock().await;
+                if let Some(t) = g.get_mut(&id) {
+                    t.mark_dispatched(hen_id);
                 }
             }
         }
@@ -143,13 +143,13 @@ pub async fn send_keys_to_hen(
     // Topic filter: leased hens enforce their owner's allow/deny keywords
     // on every prompt that flows through send-keys (covers both the task
     // queue and the /shell/send endpoint).
-    if let Ok(hen) = orch.get_hen(hen_id.clone()).await {
-        if let Err(reason) = crate::api::enforce_lease_topic(&hen, text) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                reason,
-            ));
-        }
+    if let Ok(hen) = orch.get_hen(hen_id.clone()).await
+        && let Err(reason) = crate::api::enforce_lease_topic(&hen, text)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            reason,
+        ));
     }
     if !session::tmux_available() {
         return Err(std::io::Error::new(

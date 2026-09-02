@@ -192,9 +192,28 @@ if missing_out=$("$ROOT/target/debug/coop" --api "$API" hen starter missing \
   r "starter unexpectedly succeeded with a missing secret: $missing_out"
   exit 1
 fi
-echo "$missing_out" | grep -q 'vault secret `does-not-exist` is missing' \
+echo "$missing_out" | grep -q 'vault: key not found: does-not-exist' \
   && g "missing provider secret fails clearly" \
   || { r "unexpected missing-secret error: $missing_out"; exit 1; }
+
+if azure_out=$("$ROOT/target/debug/coop" --api "$API" hen starter malformed \
+  --provider-id azure-kv:// 2>&1); then
+  r "starter unexpectedly accepted a malformed Azure reference: $azure_out"
+  exit 1
+fi
+echo "$azure_out" | grep -q 'invalid azure-kv reference' \
+  && g "malformed Azure provider fails before Hen creation" \
+  || { r "unexpected Azure preflight error: $azure_out"; exit 1; }
+if keyless_out=$("$ROOT/target/debug/coop" --api "$API" hen starter keyless \
+  --provider-id none 2>&1); then
+  r "Anthropic starter unexpectedly accepted provider_id=none: $keyless_out"
+  exit 1
+fi
+echo "$keyless_out" | grep -q 'allowed only for provider openai-compat' \
+  && g "keyless provider is restricted to OpenAI-compatible brains" \
+  || { r "unexpected keyless-provider error: $keyless_out"; exit 1; }
+n=$(j_get "$(curl -fsS "$API/api/v1/farm")" "hen_count")
+[[ "$n" == "0" ]] && g "provider preflights left no partial Hen" || { r "preflight created $n Hen(s)"; exit 1; }
 
 # 6. WSS subscriber
 b "[6] WSS /watch (start subscriber)"

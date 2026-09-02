@@ -7,7 +7,7 @@
 [![CI](https://github.com/dcluomax/coop/actions/workflows/ci.yml/badge.svg)](https://github.com/dcluomax/coop/actions/workflows/ci.yml)
 [![Release](https://github.com/dcluomax/coop/actions/workflows/release.yml/badge.svg)](https://github.com/dcluomax/coop/actions/workflows/release.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE-APACHE)
-[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg?logo=rust)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.91.1%2B-orange.svg?logo=rust)](https://www.rust-lang.org)
 [![Status](https://img.shields.io/badge/status-pre--alpha-orange.svg)](./CHANGELOG.md)
 
 **[Quickstart](#-quickstart)** ·
@@ -66,7 +66,7 @@ Sealing your model key, hatching a starter Hen without YAML, and running your
 first job →
 **[docs/quickstart.md](./docs/quickstart.md)**.
 
-Prefer source? `git clone … && cargo build --release` (Rust 1.85+), binaries land
+Prefer source? `git clone … && cargo build --release` (Rust 1.91.1+), binaries land
 in `target/release/`.
 
 ## 📦 Deploy
@@ -81,7 +81,8 @@ in `target/release/`.
 | 🦀 **Source** | `cargo build --release --workspace` |
 
 Full guide, including LAN/public exposure and the **required** `COOP_API_TOKEN`
-+ `COOP_PUBLIC` settings → **[docs/deployment.md](./docs/deployment.md)**.
++ `COOP_PUBLIC` + `COOP_PUBLIC_ORIGIN` settings →
+**[docs/deployment.md](./docs/deployment.md)**.
 
 ## 🏛️ Architecture
 

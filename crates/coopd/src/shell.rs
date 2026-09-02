@@ -14,7 +14,7 @@
 //! | S → C     | Binary  | raw stdout/stderr bytes (the terminal stream)           |
 //! | S → C     | Text    | JSON `{"type":"exit","code":N}` then the socket closes  |
 //!
-//! No authentication. v0.1 assumes the daemon binds to loopback only.
+//! Authentication and origin checks are enforced by the outer HTTP router.
 
 use std::io::{Read, Write};
 use std::sync::Arc;
@@ -194,22 +194,22 @@ async fn run(socket: WebSocket, orch: OrchHandle, raw_id: String) {
                 false
             }
         };
-        if let Some(cli) = hen.manifest.agent_kind.launch_cmd() {
-            if !already {
-                let sess = sess_name.clone();
-                let tmux_tmpdir = tmux_dir.clone();
-                let cli_cmd = cli.to_string();
-                tokio::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-                    let _ = tokio::task::spawn_blocking(move || {
-                        let _ = std::process::Command::new("tmux")
-                            .env("TMUX_TMPDIR", &tmux_tmpdir)
-                            .args(["-L", "coop", "send-keys", "-t", &sess, &cli_cmd, "Enter"])
-                            .status();
-                    })
-                    .await;
-                });
-            }
+        if let Some(cli) = hen.manifest.agent_kind.launch_cmd()
+            && !already
+        {
+            let sess = sess_name.clone();
+            let tmux_tmpdir = tmux_dir.clone();
+            let cli_cmd = cli.to_string();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                let _ = tokio::task::spawn_blocking(move || {
+                    let _ = std::process::Command::new("tmux")
+                        .env("TMUX_TMPDIR", &tmux_tmpdir)
+                        .args(["-L", "coop", "send-keys", "-t", &sess, &cli_cmd, "Enter"])
+                        .status();
+                })
+                .await;
+            });
         }
     }
 

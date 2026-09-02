@@ -44,7 +44,7 @@ use serenity::{Client, async_trait};
 use tracing::{error, info, warn};
 
 /// Runtime config for the Discord connector.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DiscordConfig {
     /// Bot token (from <https://discord.com/developers/applications>).
     pub token: String,
@@ -56,10 +56,26 @@ pub struct DiscordConfig {
     pub api_base: String,
     /// Coop ID (e.g. `local.coop`) used to build full hen IDs from channel names.
     pub coop_id: String,
+    /// Optional coopd API bearer token for the connector's loopback requests.
+    pub api_token: Option<String>,
     /// Discord user IDs allowed to issue commands. If empty the bot refuses
     /// every prompt (failsafe: any guild member could otherwise execute
     /// arbitrary jobs against the farm). Set via `COOP_DISCORD_ALLOWED_USERS`.
     pub allowed_user_ids: Vec<u64>,
+}
+
+impl std::fmt::Debug for DiscordConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DiscordConfig")
+            .field("token", &"<redacted>")
+            .field("guild_id", &self.guild_id)
+            .field("prefix", &self.prefix)
+            .field("api_base", &self.api_base)
+            .field("coop_id", &self.coop_id)
+            .field("api_token", &self.api_token.as_ref().map(|_| "<redacted>"))
+            .field("allowed_user_ids", &self.allowed_user_ids)
+            .finish()
+    }
 }
 
 impl DiscordConfig {
@@ -71,6 +87,9 @@ impl DiscordConfig {
         let prefix = std::env::var("COOP_DISCORD_PREFIX").unwrap_or_else(|_| "!coop".to_string());
         let api_base =
             std::env::var("COOP_API_BASE").unwrap_or_else(|_| "http://127.0.0.1:9700".to_string());
+        let api_token = std::env::var("COOP_API_TOKEN")
+            .ok()
+            .filter(|token| !token.trim().is_empty());
         let allowed_user_ids = std::env::var("COOP_DISCORD_ALLOWED_USERS")
             .ok()
             .map(|s| {
@@ -87,6 +106,7 @@ impl DiscordConfig {
             prefix,
             api_base,
             coop_id: coop_id.to_string(),
+            api_token,
             allowed_user_ids,
         })
     }
@@ -103,8 +123,16 @@ impl DiscordConfig {
 /// the token is malformed). Network and gateway errors are handled internally
 /// by Serenity's reconnection logic.
 pub async fn spawn(cfg: DiscordConfig) -> Result<tokio::task::JoinHandle<()>> {
+    let mut default_headers = reqwest::header::HeaderMap::new();
+    if let Some(token) = cfg.api_token.as_deref() {
+        let mut value = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
+            .context("COOP_API_TOKEN is not a valid header value")?;
+        value.set_sensitive(true);
+        default_headers.insert(reqwest::header::AUTHORIZATION, value);
+    }
     let http = reqwest::Client::builder()
         .user_agent("coopd-discord/0.1")
+        .default_headers(default_headers)
         .build()
         .context("build reqwest client")?;
     let handler = Handler {
@@ -330,7 +358,7 @@ mod urlencoding {
 
 #[cfg(test)]
 mod tests {
-    use super::urlencoding::encode;
+    use super::{DiscordConfig, urlencoding::encode};
 
     #[test]
     fn url_encodes_slash() {
@@ -349,5 +377,21 @@ mod tests {
         for cmd in ["status", "hatch", "sleep", "wake", "help"] {
             assert!(h.contains(cmd), "help text missing {cmd}");
         }
+    }
+
+    #[test]
+    fn config_debug_redacts_tokens() {
+        let cfg = DiscordConfig {
+            token: "discord-secret".into(),
+            guild_id: 1,
+            prefix: "!coop".into(),
+            api_base: "http://127.0.0.1:9700".into(),
+            coop_id: "local.coop".into(),
+            api_token: Some("coop-secret".into()),
+            allowed_user_ids: vec![1],
+        };
+        let debug = format!("{cfg:?}");
+        assert!(!debug.contains("discord-secret"));
+        assert!(!debug.contains("coop-secret"));
     }
 }

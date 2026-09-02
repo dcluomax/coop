@@ -7,35 +7,14 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 
 /// `http` tool — perform an HTTP request.
-#[derive(Debug)]
-pub struct Http {
-    client: reqwest::Client,
-}
+#[derive(Debug, Default)]
+pub struct Http;
 
 impl Http {
     /// Construct a new HTTP tool with a shared `reqwest` client.
     ///
-    /// # Panics
-    ///
-    /// Panics if the underlying `reqwest::Client` builder fails (e.g. the
-    /// platform has no TLS backend available). In practice this only fails
-    /// in extremely broken environments and is treated as unrecoverable at
-    /// daemon startup.
     pub fn new() -> Self {
-        // Disable auto-redirects — we run our own bounded, SSRF-checked loop.
-        let client = reqwest::Client::builder()
-            .user_agent(concat!("coopd-tools/", env!("CARGO_PKG_VERSION")))
-            .timeout(std::time::Duration::from_secs(60))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("build reqwest client");
-        Self { client }
-    }
-}
-
-impl Default for Http {
-    fn default() -> Self {
-        Self::new()
+        Self
     }
 }
 
@@ -63,6 +42,8 @@ struct Output {
 }
 
 const MAX_BODY: usize = 1024 * 1024; // 1 MiB cap returned to model.
+const MAX_REQUEST_BODY: usize = 1024 * 1024;
+const MAX_REQUEST_HEADERS: usize = 64 * 1024;
 const CAPS: &[ToolCapability] = &[ToolCapability::NetOut];
 
 #[async_trait]
@@ -107,7 +88,26 @@ impl CoopTool for Http {
         let inp: Input = serde_json::from_value(input)?;
         let method = reqwest::Method::from_bytes(inp.method.as_bytes())
             .map_err(|e| CoreError::Other(format!("invalid method: {e}")))?;
+        if inp
+            .body
+            .as_ref()
+            .is_some_and(|body| body.len() > MAX_REQUEST_BODY)
+        {
+            return Err(CoreError::Other(format!(
+                "http request body exceeds {MAX_REQUEST_BODY} bytes"
+            )));
+        }
+        let header_bytes = inp.headers.iter().try_fold(0usize, |total, (name, value)| {
+            total.checked_add(name.len() + value.len())
+        });
+        if header_bytes.is_none_or(|bytes| bytes > MAX_REQUEST_HEADERS) {
+            return Err(CoreError::Other(format!(
+                "http request headers exceed {MAX_REQUEST_HEADERS} bytes"
+            )));
+        }
 
+        let original_url = reqwest::Url::parse(&inp.url)
+            .map_err(|e| CoreError::Other(format!("invalid url: {e}")))?;
         let mut current_url = inp.url.clone();
         let mut hops = 0usize;
         let resp = loop {
@@ -115,11 +115,29 @@ impl CoopTool for Http {
             // must match. `open` falls through to the SSRF guard below. This is
             // enforced for the initial URL *and* every redirect target.
             crate::safe_net::enforce_policy(&ctx.net_policy, &current_url)?;
-            crate::safe_net::validate_url(&current_url).await?;
-            let mut req = self.client.request(method.clone(), &current_url);
+            let (host, addrs) = crate::safe_net::resolve_public_url(&current_url).await?;
+            // Pin reqwest to the addresses that passed validation. Resolving
+            // once for validation and again during connect would leave a DNS
+            // rebinding window.
+            let client = reqwest::Client::builder()
+                .user_agent(concat!("coopd-tools/", env!("CARGO_PKG_VERSION")))
+                .timeout(std::time::Duration::from_secs(60))
+                .redirect(reqwest::redirect::Policy::none())
+                .no_proxy()
+                .resolve_to_addrs(&host, &addrs)
+                .build()
+                .map_err(|e| CoreError::Other(format!("http client: {e}")))?;
+            let parsed_current = reqwest::Url::parse(&current_url)
+                .map_err(|e| CoreError::Other(format!("invalid url: {e}")))?;
+            let same_origin = urls_share_origin(&original_url, &parsed_current);
+            let mut req = client.request(method.clone(), &current_url);
             for (k, v) in &inp.headers {
+                if !same_origin && is_sensitive_header(k) {
+                    continue;
+                }
                 req = req.header(k, v);
             }
+
             if let Some(ref b) = inp.body {
                 req = req.body(b.clone());
             }
@@ -156,17 +174,21 @@ impl CoopTool for Http {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
-        let bytes = resp
-            .bytes()
-            .await
-            .map_err(|e| CoreError::Other(format!("http body: {e}")))?;
-        let truncated = bytes.len() > MAX_BODY;
-        let slice = if truncated {
-            &bytes[..MAX_BODY]
-        } else {
-            &bytes[..]
-        };
-        let body = String::from_utf8_lossy(slice).into_owned();
+        use futures::StreamExt;
+        let mut stream = resp.bytes_stream();
+        let mut bytes = Vec::with_capacity(MAX_BODY.min(64 * 1024));
+        let mut truncated = false;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| CoreError::Other(format!("http body: {e}")))?;
+            let remaining = MAX_BODY.saturating_sub(bytes.len());
+            if chunk.len() > remaining {
+                bytes.extend_from_slice(&chunk[..remaining]);
+                truncated = true;
+                break;
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let body = String::from_utf8_lossy(&bytes).into_owned();
         Ok(serde_json::to_value(Output {
             status,
             headers,
@@ -174,6 +196,21 @@ impl CoopTool for Http {
             truncated,
         })?)
     }
+}
+
+fn urls_share_origin(left: &reqwest::Url, right: &reqwest::Url) -> bool {
+    left.scheme() == right.scheme()
+        && left
+            .host_str()
+            .zip(right.host_str())
+            .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b))
+        && left.port_or_known_default() == right.port_or_known_default()
+}
+
+fn is_sensitive_header(name: &str) -> bool {
+    name.eq_ignore_ascii_case("authorization")
+        || name.eq_ignore_ascii_case("cookie")
+        || name.eq_ignore_ascii_case("proxy-authorization")
 }
 
 #[cfg(test)]
@@ -259,5 +296,36 @@ mod tests {
             format!("{err}").contains("network policy"),
             "unlisted host should be denied, got: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn request_body_is_bounded_before_network_access() {
+        let h = Http::new();
+        let ctx = crate::test_ctx(std::env::temp_dir());
+        let err = h
+            .invoke(
+                &ctx,
+                json!({
+                    "url": "https://example.com/",
+                    "body": "x".repeat(MAX_REQUEST_BODY + 1)
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(format!("{err}").contains("request body exceeds"));
+    }
+
+    #[test]
+    fn cross_origin_redirects_drop_credentials() {
+        let original = reqwest::Url::parse("https://api.example/a").unwrap();
+        let same = reqwest::Url::parse("https://API.example/b").unwrap();
+        let other = reqwest::Url::parse("https://evil.example/b").unwrap();
+        let downgrade = reqwest::Url::parse("http://api.example/b").unwrap();
+        assert!(urls_share_origin(&original, &same));
+        assert!(!urls_share_origin(&original, &other));
+        assert!(!urls_share_origin(&original, &downgrade));
+        assert!(is_sensitive_header("Authorization"));
+        assert!(is_sensitive_header("cookie"));
+        assert!(!is_sensitive_header("content-type"));
     }
 }

@@ -6,7 +6,6 @@
 //! one of:
 //!
 //!   * `Authorization: Bearer <token>` header
-//!   * `?token=<token>` query parameter
 //!   * `coop_token=<token>` cookie (set by `POST /api/v1/auth/login`)
 //!
 //! A small `/login` HTML page is served so the browser UI can authenticate.
@@ -162,11 +161,11 @@ async fn require_token(State(cfg): State<AuthConfig>, req: Request, next: Next) 
         return next.run(req).await;
     }
 
-    let presented = extract_token(req.headers(), req.uri().query());
-    if let Some(tok) = presented {
-        if cfg.matches(&tok) {
-            return next.run(req).await;
-        }
+    let presented = extract_token(req.headers());
+    if let Some(tok) = presented
+        && cfg.matches(&tok)
+    {
+        return next.run(req).await;
     }
 
     // Browser → redirect to /login. API client → 401 JSON.
@@ -188,76 +187,32 @@ async fn require_token(State(cfg): State<AuthConfig>, req: Request, next: Next) 
     }
 }
 
-fn extract_token(headers: &HeaderMap, query: Option<&str>) -> Option<String> {
+fn extract_token(headers: &HeaderMap) -> Option<String> {
     // 1. Authorization: Bearer <token>
     if let Some(v) = headers
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
-    {
-        if let Some(rest) = v
+        && let Some(rest) = v
             .strip_prefix("Bearer ")
             .or_else(|| v.strip_prefix("bearer "))
-        {
-            let t = rest.trim();
-            if !t.is_empty() {
-                return Some(t.to_string());
-            }
+    {
+        let t = rest.trim();
+        if !t.is_empty() {
+            return Some(t.to_string());
         }
     }
-    // 2. ?token=...
-    if let Some(q) = query {
-        for pair in q.split('&') {
-            let mut parts = pair.splitn(2, '=');
-            let k = parts.next().unwrap_or("");
-            let v = parts.next().unwrap_or("");
-            if k == "token" && !v.is_empty() {
-                return Some(url_decode(v));
-            }
-        }
-    }
-    // 3. Cookie: coop_token=...
+    // 2. Cookie: coop_token=...
     if let Some(c) = headers.get(header::COOKIE).and_then(|h| h.to_str().ok()) {
         for pair in c.split(';') {
             let pair = pair.trim();
-            if let Some(v) = pair.strip_prefix("coop_token=") {
-                if !v.is_empty() {
-                    return Some(v.to_string());
-                }
+            if let Some(v) = pair.strip_prefix("coop_token=")
+                && !v.is_empty()
+            {
+                return Some(v.to_string());
             }
         }
     }
     None
-}
-
-fn url_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let (Some(h), Some(l)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
-                out.push((h << 4) | l);
-                i += 3;
-                continue;
-            }
-        }
-        if bytes[i] == b'+' {
-            out.push(b' ');
-        } else {
-            out.push(bytes[i]);
-        }
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-fn hex_val(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
 }
 
 #[derive(Deserialize)]
@@ -275,7 +230,7 @@ async fn status(State(cfg): State<AuthConfig>, headers: HeaderMap) -> Json<Statu
     let authenticated = if !cfg.enabled() {
         true
     } else {
-        extract_token(&headers, None).is_some_and(|t| cfg.matches(&t))
+        extract_token(&headers).is_some_and(|t| cfg.matches(&t))
     };
     Json(StatusBody {
         enabled: cfg.enabled(),
@@ -397,12 +352,5 @@ mod tests {
         // Success clears the counter.
         lim.clear(ip);
         assert!(lim.allowed(ip));
-    }
-
-    #[test]
-    fn url_decode_basic() {
-        assert_eq!(url_decode("hello%20world"), "hello world");
-        assert_eq!(url_decode("a+b"), "a b");
-        assert_eq!(url_decode("plain"), "plain");
     }
 }

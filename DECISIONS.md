@@ -12,7 +12,7 @@ In:
 - Built-in tools: `bash`, `file_read`, `file_write`, `http`, `git`, `sleep`, `log`
 - Local HTTP API on `localhost:9700`
 - redb persistence
-- Sealed vault (sodiumoxide, passphrase-derived key)
+- Sealed vault (XChaCha20-Poly1305, Argon2id passphrase-derived key)
 - Reconciler loop
 - Structured logging (`tracing`)
 - Subprocess Hen runtime (UNIX socket JSON-RPC)
@@ -35,13 +35,13 @@ Out (deferred to ≥ v0.2):
 |---|---|---|
 | Language | Rust | Already decided in L1 doc |
 | Edition | 2024 | Latest stable |
-| MSRV | 1.85+ | edition 2024 requirement |
+| MSRV | 1.91.1+ | pinned across local development, CI, containers, and releases |
 | Async runtime | Tokio multi-thread | Industry standard |
-| Workspace | Cargo workspace, 5 crates v0.1 | Modular, parallel build |
+| Workspace | Cargo workspace, 8 OSS crates | Modular, parallel build |
 | HTTP framework | axum 0.7 | Ergonomic, tokio-native |
 | Storage | redb 2.x | Pure-Rust, ACID, embedded |
-| Crypto | ed25519-dalek + blake3 + sodiumoxide | Standard, well-audited |
-| Serialization | serde + serde_json + serde_yaml + prost | One-stop |
+| Crypto | XChaCha20-Poly1305 + Argon2id; ed25519/blake3 primitives | Sealed vault today, identity primitives later |
+| Serialization | serde + serde_json + serde_yaml | One-stop |
 | CLI | clap 4 (derive) | Standard |
 | Error | thiserror (libs) + anyhow (bins) | Idiomatic split |
 | Logging | tracing + tracing-subscriber | Structured, async-friendly |
@@ -107,8 +107,6 @@ coop/
 ```
 
 Crates deferred to later phases:
-- coopd-brain (lifted from brain trait, v0.2 multi-provider)
-- coopd-tools (plugin loader, v0.2)
 - coopd-world (WSS to World, v0.3)
 - coopd-mesh (worker gRPC, v0.2)
 - coopd-ledger (Grain, v0.4)

@@ -10,7 +10,6 @@
 | `COOP_LOG` | `info` | Tracing filter, e.g. `coopd=debug`. |
 | `COOP_VAULT` + `COOP_PASSPHRASE` | *(unset)* | Auto-unlock this sealed vault at startup. |
 | `COOP_SANDBOX` | `1` | Set to `0` to disable the per-hen `bash` OS sandbox (not recommended). |
-| `COOP_MARKET_URL` | `https://farm.startcaas.com` | Public Market URL shown in the Farm UI. |
 
 ## Exposure & auth
 
@@ -18,13 +17,15 @@
 |----------|---------|---------|
 | `COOP_API_TOKEN` | *(unset)* | Bearer token for the API/UI. **Required before exposing beyond loopback.** Unset = auth disabled. |
 | `COOP_PUBLIC` | *(unset)* | Set to `1` to accept non-loopback `Host`/`Origin` headers (needed for LAN/public binds). |
+| `COOP_PUBLIC_ORIGIN` | *(unset)* | Exact browser origin required with `COOP_PUBLIC=1`, including scheme and non-default port (for example `https://farm.example.com`). |
 | `COOP_LOGIN_MAX_ATTEMPTS` | `10` | Failed `/auth/login` attempts per client IP per 60s before HTTP 429. |
 | `COOP_MAX_PROMPT_BYTES` | `262144` | Max job/task prompt size in bytes (`0` disables); over-size → HTTP 413. |
 
 Auth is opt-in: with `COOP_API_TOKEN` set, every `/api/v1/*` request and the UI
-must present the token via `Authorization: Bearer <token>`, a `?token=` query
-param, or the `coop_token` cookie (set by the `/login` page). Healthchecks are
-always exempt.
+must present the token via `Authorization: Bearer <token>` or the `coop_token`
+cookie (set by the `/login` page). Tokens are not accepted in URLs, where
+browser history and proxy logs could expose them. Healthchecks are always
+exempt.
 
 ## Discord connector
 
@@ -124,9 +125,16 @@ Tool calls round-trip as structured `tool_use`/`tool_result` blocks across all
 providers; the OpenAI adapter translates them to and from OpenAI's
 `tool_calls` / `role:tool` message shape and normalizes `finish_reason`.
 
-Both adapters also support **streaming** (`BrainAdapter::stream`): provider SSE
-streams are decoded into incremental text deltas plus a final assembled
-response.
+Both adapters implement provider-level **streaming** (`BrainAdapter::stream`):
+provider SSE streams are decoded into incremental text deltas plus a final
+assembled response. The v0.1 job runner still uses complete responses; live
+incremental runner output is not shipped yet.
+
+## Runtime limits
+
+Each job is capped at 16 reason/tool turns. This v0.1 safety limit is compiled
+in and is not configurable; a job that reaches it fails with
+`max turns (16) exhausted`.
 
 ## Fallback brains
 

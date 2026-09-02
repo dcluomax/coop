@@ -23,6 +23,7 @@ struct Output {
     path: String,
 }
 
+const MAX_WRITE_BYTES: usize = 4 * 1024 * 1024;
 const CAPS: &[ToolCapability] = &[ToolCapability::FsWrite];
 
 #[async_trait]
@@ -61,56 +62,46 @@ impl CoopTool for FileWrite {
     }
     async fn invoke(&self, ctx: &ToolCtx, input: Value) -> Result<Value> {
         let inp: Input = serde_json::from_value(input)?;
-        // Need a writable parent — create the requested subdirs *inside*
-        // the workdir first (validated path-segment by path-segment), then
-        // run the strict safe_resolve which checks the canonicalized parent.
-        let user_path = std::path::Path::new(&inp.path);
-        if user_path.is_absolute() {
+        if inp.content.len() > MAX_WRITE_BYTES {
             return Err(CoreError::Other(format!(
-                "absolute paths are not allowed: {}",
-                inp.path
+                "file_write content exceeds {MAX_WRITE_BYTES} bytes"
             )));
         }
-        for c in user_path.components() {
-            if matches!(
-                c,
-                std::path::Component::ParentDir
-                    | std::path::Component::RootDir
-                    | std::path::Component::Prefix(_)
-            ) {
-                return Err(CoreError::Other(format!(
-                    "path traversal not allowed: {}",
-                    inp.path
-                )));
+        crate::safe_path::validate_relative_path(&inp.path)?;
+        let bytes_written = inp.content.len();
+        let display_path = ctx.workdir.join(&inp.path);
+        let base = ctx.workdir.clone();
+        let user_path = inp.path;
+        let content = inp.content;
+        tokio::task::spawn_blocking(move || {
+            use std::io::Write;
+
+            let dir = cap_std::fs::Dir::open_ambient_dir(&base, cap_std::ambient_authority())
+                .map_err(|e| CoreError::Io(format!("open workdir {}: {e}", base.display())))?;
+            if let Some(parent) = std::path::Path::new(&user_path).parent()
+                && !parent.as_os_str().is_empty()
+            {
+                dir.create_dir_all(parent)
+                    .map_err(|e| CoreError::Io(format!("mkdir {}: {e}", parent.display())))?;
             }
-        }
-        let joined = ctx.workdir.join(user_path);
-        if let Some(parent) = joined.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| CoreError::Io(format!("mkdir {}: {e}", parent.display())))?;
-        }
-        let p = crate::safe_path::safe_resolve(&ctx.workdir, &inp.path, false)?;
-        let bytes = inp.content.as_bytes();
-        if inp.append {
-            use tokio::io::AsyncWriteExt;
-            let mut f = tokio::fs::OpenOptions::new()
-                .append(true)
-                .create(true)
-                .open(&p)
-                .await
-                .map_err(|e| CoreError::Io(format!("open {}: {e}", p.display())))?;
-            f.write_all(bytes)
-                .await
-                .map_err(|e| CoreError::Io(format!("write: {e}")))?;
-        } else {
-            tokio::fs::write(&p, bytes)
-                .await
-                .map_err(|e| CoreError::Io(format!("write {}: {e}", p.display())))?;
-        }
+            let mut options = cap_std::fs::OpenOptions::new();
+            options.write(true).create(true);
+            if inp.append {
+                options.append(true);
+            } else {
+                options.truncate(true);
+            }
+            let mut file = dir
+                .open_with(&user_path, &options)
+                .map_err(|e| CoreError::Io(format!("open {user_path}: {e}")))?;
+            file.write_all(content.as_bytes())
+                .map_err(|e| CoreError::Io(format!("write {user_path}: {e}")))
+        })
+        .await
+        .map_err(|e| CoreError::Io(format!("file_write task: {e}")))??;
         Ok(serde_json::to_value(Output {
-            bytes_written: bytes.len(),
-            path: p.display().to_string(),
+            bytes_written,
+            path: display_path.display().to_string(),
         })?)
     }
 }
@@ -155,5 +146,21 @@ mod tests {
             .await
             .unwrap_err();
         assert!(format!("{err}").contains("traversal") || format!("{err}").contains(".."));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn descriptor_relative_open_rejects_symlink_escape() {
+        let dir = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("escape")).unwrap();
+        let ctx = crate::test_ctx(dir.path().to_path_buf());
+        assert!(
+            FileWrite
+                .invoke(&ctx, json!({ "path": "escape/pwned", "content": "nope" }),)
+                .await
+                .is_err()
+        );
+        assert!(!outside.path().join("pwned").exists());
     }
 }

@@ -62,13 +62,13 @@ jobs:
             archive: tar.gz
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - uses: dtolnay/rust-toolchain@1.91.1
+      - uses: dtolnay/rust-toolchain@38ae5351029910ad7674ccfad89c37cbd636f3c4 # 1.91.1
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: ${{ matrix.target }}
 
@@ -110,7 +110,7 @@ jobs:
           if [[ "${{ matrix.target }}" == *windows* ]]; then ext=".exe"; fi
           cp "target/${{ matrix.target }}/release/coopd${ext}" "$stage/"
           cp "target/${{ matrix.target }}/release/coop${ext}"  "$stage/"
-          cp README.md LICENSE CHANGELOG.md "$stage/" 2>/dev/null || true
+          cp README.md LICENSE-APACHE NOTICE CHANGELOG.md "$stage/"
           echo "stage=$stage" >> "$GITHUB_OUTPUT"
 
       - name: Archive (tar.gz)
@@ -134,7 +134,7 @@ jobs:
           "$h  ${{ steps.stage.outputs.stage }}.zip" | Out-File -Encoding ascii "${{ steps.stage.outputs.stage }}.zip.sha256"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: ${{ steps.stage.outputs.stage }}
           path: |
@@ -150,7 +150,7 @@ jobs:
     runs-on: macos-latest
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Determine version
         id: ver
@@ -163,13 +163,13 @@ jobs:
           fi
 
       - name: Download Apple Silicon build
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: coop-${{ steps.ver.outputs.tag }}-aarch64-apple-darwin
           path: arm64
 
       - name: Download Intel build
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: coop-${{ steps.ver.outputs.tag }}-x86_64-apple-darwin
           path: x86
@@ -189,11 +189,11 @@ jobs:
               "x86/coop-${tag}-x86_64-apple-darwin/$bin"
             chmod +x "$stage/$bin"
           done
-          cp README.md LICENSE CHANGELOG.md "$stage/" 2>/dev/null || true
+          cp README.md LICENSE-APACHE NOTICE CHANGELOG.md "$stage/"
           tar -czf "$stage.tar.gz" "$stage"
           shasum -a 256 "$stage.tar.gz" > "$stage.tar.gz.sha256"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: coop-${{ steps.ver.outputs.tag }}-universal-apple-darwin
           path: |
@@ -222,11 +222,11 @@ jobs:
             target: armv7-unknown-linux-gnueabihf
             cross: true
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.91.1
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@38ae5351029910ad7674ccfad89c37cbd636f3c4 # 1.91.1
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: deb-${{ matrix.target }}
       - name: Install cross
@@ -250,7 +250,7 @@ jobs:
           mkdir -p debout
           cp target/${{ matrix.target }}/debian/*.deb debout/
           ls -la debout/
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: coop-deb-${{ matrix.debarch }}
           path: debout/*.deb
@@ -263,8 +263,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           path: dist
       - name: Flatten artifacts
@@ -274,7 +274,7 @@ jobs:
             -exec cp {} out/ \;
           ls -la out/
       - name: Create / update release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: out/*
           generate_release_notes: true
@@ -321,7 +321,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Render formula from release checksums
         shell: bash
         run: |

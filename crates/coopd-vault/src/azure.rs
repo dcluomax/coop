@@ -331,10 +331,10 @@ impl AzureKeyVault {
             return Ok(t.clone());
         }
         let mut guard = self.inner.cached.lock().await;
-        if let Some(cached) = guard.as_ref() {
-            if Instant::now() < cached.expires_at {
-                return Ok(cached.token.clone());
-            }
+        if let Some(cached) = guard.as_ref()
+            && Instant::now() < cached.expires_at
+        {
+            return Ok(cached.token.clone());
         }
         let fresh = self.acquire_token().await?;
         let token = fresh.token.clone();

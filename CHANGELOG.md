@@ -6,6 +6,33 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.3] - 2026-09-02
+
+### Security
+
+- The binary installer now fails closed when a release checksum is missing,
+  malformed, or cannot be verified.
+- CI and release actions are pinned to immutable commit SHAs.
+- Public mode and non-loopback binds now fail closed without bearer auth;
+  browser origins must match the request host, opaque origins are rejected, and
+  bearer tokens are no longer accepted from leak-prone URL query strings.
+- The `http` tool pins connections to the DNS addresses that passed SSRF
+  validation, closing a DNS-rebinding window, strips credentials on
+  cross-origin redirects, and streams at most 1 MiB of a response instead of
+  buffering an unbounded body.
+- `bash`, `file_read`, and `file_write` now enforce hard I/O bounds. Timed-out
+  shell process groups are killed, command output is drained but capped, and
+  file operations resolve through a descriptor-relative capability directory
+  that remains confined during concurrent symlink swaps.
+- Starter Hens preflight the actual daemon-side provider resolver before
+  creation, including Azure Key Vault reference parsing and secret retrieval;
+  keyless `provider_id: none` is accepted only for OpenAI-compatible brains.
+- Episodic retention is enforced before memory reads, so an idle Hen cannot
+  replay or inherit an expired episode, and retention values are range-checked.
+- The Discord connector now authenticates its loopback API calls when coopd
+  bearer auth is enabled, while redacting both Discord and coopd tokens in
+  debug output.
+
 ### Added
 
 - **YAML-free first hatch** — `coop hen starter [name]` creates and hatches a
@@ -51,6 +78,10 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
   proprietary Market config endpoint and Farm UI tab from `coopd`; a new
   `scripts/check-open-core-boundary.sh` gate blocks crate/config/API/UI leaks in
   CI.
+- Release archives now include the Apache-2.0 license and NOTICE under their
+  real repository filenames.
+- Source-build documentation and package metadata now match the pinned Rust
+  1.91.1 toolchain.
 - README now leads with shipped single-farm value (hatch, work, remember,
   delegate) and lists only install paths that are currently available.
 

@@ -359,10 +359,10 @@ impl BrainAdapter for OpenAi {
             .ok_or_else(|| CoreError::Other(format!("{}: empty choices", self.provider)))?;
 
         let mut content: Vec<ContentBlock> = Vec::new();
-        if let Some(text) = choice.message.content {
-            if !text.is_empty() {
-                content.push(ContentBlock::Text { text });
-            }
+        if let Some(text) = choice.message.content
+            && !text.is_empty()
+        {
+            content.push(ContentBlock::Text { text });
         }
         for tc in choice.message.tool_calls {
             // OpenAI tool arguments are a JSON *string*; decode to an object so

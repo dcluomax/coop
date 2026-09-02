@@ -168,6 +168,9 @@ async fn spawn_locked(g: &mut Inner) {
         prefix: cfg.prefix,
         api_base: cfg.api_base.unwrap_or_else(|| g.default_api_base.clone()),
         coop_id: g.coop_id.clone(),
+        api_token: std::env::var("COOP_API_TOKEN")
+            .ok()
+            .filter(|token| !token.trim().is_empty()),
         allowed_user_ids: cfg.allowed_user_ids,
     };
     match coopd_discord::spawn(bot_cfg).await {

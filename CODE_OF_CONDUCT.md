@@ -28,9 +28,9 @@ Examples of unacceptable behavior:
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the project maintainers at **conduct@coop.network** (placeholder
-until the email is provisioned — until then, open a private security advisory
-on GitHub).
+reported privately through the repository's
+[Security Advisory form](https://github.com/dcluomax/coop/security/advisories/new);
+prefix the title with `Code of Conduct`.
 
 All complaints will be reviewed and investigated promptly and fairly. Project
 maintainers are obligated to respect the privacy and security of the reporter
