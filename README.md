@@ -110,6 +110,12 @@ state badge and lets you **click a hen to open a real terminal** streamed over
 WebSocket directly into that hen's workdir — drive `claude login` / `gh auth
 login`, inspect generated files, or troubleshoot a stuck job.
 
+The **Jobs** workspace keeps durable prompts, results and failures searchable
+across refreshes and restarts. Filter by Hen/state, copy or deep-link a result,
+retry a failed job, or cancel work that is still queued. **Tasks** remain the
+separate dispatch queue for terminal-hosted CLI agents; dispatch is not proof
+that the external agent finished. See [Jobs and recovery](docs/jobs.md).
+
 <table>
   <tr>
     <td width="50%">

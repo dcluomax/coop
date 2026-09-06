@@ -23,6 +23,9 @@
       --accent-2:  #6cd081;
       --danger:    #ff6b6b;
       --rooster:   #ff9a3c;
+      --surface:  var(--panel);
+      --border:   var(--line);
+      --text:     var(--fg);
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
@@ -114,6 +117,8 @@
 
     .flock-list { padding: 0 6px 16px; }
     .chick {
+      width: calc(100% - 8px); background: transparent; color: inherit; text-align: left;
+      border: 0;
       display: grid; grid-template-columns: 44px 1fr auto; align-items: center;
       gap: 10px; padding: 8px 10px; margin: 2px 4px; cursor: pointer;
       border-radius: 8px; border-left: 3px solid transparent;
@@ -129,8 +134,8 @@
     }
     .chick .avatar.rooster { background: radial-gradient(circle at 30% 30%, #5a3a2a, #2a1e16); }
     .chick .meta { min-width: 0; }
-    .chick .name { font-weight: 600; font-size: 13px; }
-    .chick .sub { font-size: 11px; color: var(--muted);
+    .chick .name { display: block; font-weight: 600; font-size: 13px; }
+    .chick .sub { display: block; font-size: 11px; color: var(--muted);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .badge {
       display: inline-block; padding: 2px 7px; border-radius: 999px;
@@ -588,13 +593,13 @@
 
     /* Floating result toast when a job finishes */
     .toast {
-      position: absolute; left: 50%; bottom: 90px;
+      position: fixed; left: 50%; bottom: 24px; max-width: calc(100vw - 32px);
       transform: translateX(-50%) translateY(20px);
       background: rgba(108,208,129,0.95); color: #0d1a14;
       padding: 10px 16px; border-radius: 10px;
       font-weight: 700; font-size: 13px;
       box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-      opacity: 0; pointer-events: none; z-index: 50;
+      opacity: 0; pointer-events: none; z-index: 1000;
       transition: opacity 0.3s, transform 0.3s;
     }
     .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -998,6 +1003,7 @@
       opacity: 0.5; padding: 0 2px; border-radius: 4px;
     }
     .sess-tabs .sess .x:hover { opacity: 1; background: rgba(255,255,255,0.08); }
+    .sess-tabs .sess button { background: transparent; color: inherit; border: 0; cursor: pointer; padding: 3px; }
     .sess-tabs .sess.add {
       color: var(--muted); padding: 4px 8px;
     }
@@ -1240,12 +1246,13 @@
     .task-row button.primary:hover { filter: brightness(1.06); }
     .tasks-list { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
     .tasks-empty { padding: 36px; text-align: center; color: var(--muted); font-size: 13px; }
-    .task-item { display: grid; grid-template-columns: 84px 110px 1fr 160px 90px; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
+    .task-item { display: grid; grid-template-columns: 84px 100px minmax(0, 1fr) 120px 90px auto; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
     .task-item:last-child { border-bottom: 0; }
     .task-item .ts { color: var(--muted); }
     .task-item .kind { color: var(--accent-2); font-weight: 600; }
     .task-item .prompt { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .task-item .claimed { color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; }
+    .task-item .claimed { overflow-wrap: anywhere; }
     .task-item .stat { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; text-align: center; }
     .stat.PENDING    { background: rgba(255,210,80,0.18); color: #ffd250; }
     .stat.DISPATCHED { background: rgba(80,160,255,0.18); color: #6db8ff; }
@@ -1263,22 +1270,162 @@
     .dc-login button:hover { border-color: var(--accent-2); }
     .dc-login .vault-row { display: flex; gap: 6px; margin-top: 8px; }
     .dc-login .vault-row input { flex: 1; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 11px; font-family: ui-monospace, monospace; }
+
+    /* Operations share the viewport without hiding the farm or terminal controls. */
+    body { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+    header { flex-shrink: 0; gap: 8px; }
+    main { flex: 1; min-height: 0; height: auto; }
+    #tab-tasks, #tab-jobs { display: block; overflow-y: auto; }
+    .console { height: 100%; min-height: 0; }
+    .yard-grid { isolation: isolate; }
+    button, input, select, textarea { font: inherit; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+    .muted { color: var(--muted); }
+    .error { color: var(--danger); overflow-wrap: anywhere; }
+    .sync-bar, .action-notice {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px;
+      padding: 6px 18px; border-bottom: 1px solid var(--line);
+      background: var(--panel); font-size: 12px; flex-shrink: 0;
+    }
+    .sync-bar .sync-message { flex: 1; min-width: 180px; color: var(--muted); }
+    .sync-bar.stale .sync-message { color: var(--accent); }
+    .action-notice { color: var(--danger); }
+    .action-notice span { flex: 1; overflow-wrap: anywhere; }
+    .ops-btn {
+      background: var(--panel-2); color: var(--fg); border: 1px solid var(--line);
+      border-radius: 8px; padding: 7px 12px; cursor: pointer;
+    }
+    .ops-btn:hover:not(:disabled) { border-color: var(--accent); }
+    .ops-btn.primary { background: var(--accent); color: #2a1d05; font-weight: 700; }
+    .ops-btn.danger { color: var(--danger); border-color: rgba(255,107,107,0.4); }
+    .jobs-pane { max-width: 1500px; padding: 22px; margin: 0 auto; }
+    .jobs-heading, .jobs-pagination, .job-detail-head, .job-actions {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    .jobs-heading { justify-content: space-between; }
+    .jobs-heading h2 { margin: 0; font-size: 20px; }
+    .jobs-intro { margin: 8px 0 18px; color: var(--muted); max-width: 850px; }
+    .jobs-filters {
+      display: flex; align-items: flex-end; flex-wrap: wrap; gap: 10px;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px;
+    }
+    .jobs-filters label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+    .jobs-filters .search-field { flex: 1 1 250px; }
+    .jobs-filters input, .jobs-filters select {
+      background: var(--bg); color: var(--fg); border: 1px solid var(--line);
+      border-radius: 8px; padding: 8px 10px; min-width: 0; max-width: 100%;
+    }
+    .jobs-filters select { max-width: 280px; }
+    .jobs-meta { margin: 12px 0; font-size: 12px; color: var(--muted); }
+    .jobs-layout { display: grid; grid-template-columns: minmax(270px, 0.85fr) minmax(0, 1.15fr); gap: 16px; align-items: start; }
+    .jobs-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+    .job-open {
+      width: 100%; text-align: left; padding: 12px; border: 1px solid var(--line);
+      background: var(--panel); color: var(--fg); border-radius: 10px; cursor: pointer;
+    }
+    .job-open:hover { border-color: var(--accent-2); }
+    .job-open[aria-pressed=true] { border-color: var(--accent); background: var(--panel-2); }
+    .job-row-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .job-hen { color: var(--accent-2); font-size: 12px; overflow-wrap: anywhere; min-width: 0; }
+    .job-summary { display: block; margin: 7px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+    .job-time { display: block; color: var(--muted); font-size: 11px; }
+    .job-status { flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 999px; background: var(--bg); }
+    .job-status.QUEUED, .job-status.RUNNING { color: var(--accent); }
+    .job-status.DONE { color: var(--accent-2); }
+    .job-status.FAILED, .job-status.CANCELLED { color: var(--danger); }
+    .jobs-pagination { justify-content: space-between; margin-top: 14px; }
+    .jobs-pagination span { font-size: 12px; color: var(--muted); }
+    .jobs-empty, .job-detail-empty { padding: 24px; color: var(--muted); border: 1px dashed var(--line); border-radius: 12px; }
+    .job-detail { border: 1px solid var(--line); background: var(--panel); border-radius: 12px; min-width: 0; }
+    .job-detail-head { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+    .job-detail-head h3 { margin: 0; flex: 1; font-size: 16px; }
+    .job-detail-body { padding: 16px; }
+    .job-detail-body > p:first-child { margin-top: 0; }
+    .job-detail dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 12px; margin: 14px 0; font-size: 12px; }
+    .job-detail dt { color: var(--muted); }
+    .job-detail dd { margin: 0; overflow-wrap: anywhere; }
+    .job-detail code { font-size: 11px; }
+    .job-detail details { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+    .job-detail summary { cursor: pointer; font-weight: 600; }
+    .job-detail .copy-row { display: flex; justify-content: flex-end; margin-top: 8px; }
+    .job-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 55vh; overflow-y: auto;
+      background: var(--bg); padding: 12px; border-radius: 8px; font: 12px/1.6 ui-monospace, monospace; }
+    .job-actions { margin-top: 14px; }
+    .job-actions .muted { font-size: 12px; }
+    .task-row input, .cmd-bar input { min-width: 0; }
+    .modal { max-height: calc(100dvh - 32px); overflow-y: auto; }
+    .ctx-menu .item { background: transparent; border: 0; width: 100%; text-align: left; }
+    @media (max-width: 1000px) {
+      header { flex-wrap: wrap; padding: 8px 12px; }
+      header h1 { margin-right: auto; }
+      .topnav { order: 2; flex: 1 0 100%; margin: 0; overflow-x: auto; }
+      .topnav .navtab { flex-shrink: 0; }
+      .console-head, .head-actions { flex-wrap: wrap; }
+      .console-head { gap: 8px; }
+      .sess-tabs { flex-basis: 100%; }
+      .task-item { grid-template-columns: 84px 1fr auto; }
+      .task-item .prompt { grid-column: 1 / -1; white-space: normal; overflow-wrap: anywhere; }
+      .jobs-pane, .tasks-pane { padding: 14px; }
+    }
+    @media (max-width: 720px) {
+      .jobs-layout { grid-template-columns: minmax(0, 1fr); }
+      .job-detail { grid-row: 1; }
+      .jobs-filters label:not(.search-field) { flex: 1 1 140px; }
+      .jobs-filters select { max-width: 100%; }
+      .task-row { flex-wrap: wrap; }
+      .task-row input { flex: 1 1 100%; order: -1; }
+      #tab-agents { grid-template-columns: 1fr; grid-template-rows: auto minmax(400px, 1fr); overflow-y: auto; }
+      #tab-agents aside { max-height: 150px; border-right: 0; }
+      .flock-list { display: flex; overflow-x: auto; padding-bottom: 8px; flex-shrink: 0; }
+      .chick { min-width: 230px; }
+      aside h2 { display: none; }
+      .raise-bar { padding: 8px; }
+      .yard-toolbar { padding: 8px; }
+      .yard-toolbar .hint { display: none; }
+      .detail-card { top: 42px; right: 8px; width: calc(100% - 16px); max-width: none; }
+      .cmd-bar .chips { display: none; }
+      .cmd-bar .row .target { flex: 1; }
+      .cmd-bar { left: 6px; right: 6px; bottom: 6px; }
+      .shell-overlay { padding: 8px; }
+      .head-actions select#open-hen-select { max-width: 190px; }
+      .sync-bar, .action-notice { padding: 6px 12px; }
+      .job-detail dl { grid-template-columns: 1fr; gap: 3px; }
+      .job-detail dd { margin-bottom: 8px; }
+    }
+    @media (pointer: coarse) {
+      button, .topnav .navtab, .ghost-btn, .ctx-menu .item { min-height: 44px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+    }
   </style>
 </head>
 <body>
   <header>
     <h1>🐔 Coop Farm <span id="farm-id" class="farm-meta"></span></h1>
-    <nav class="topnav" id="topnav">
-      <button class="navtab active" data-tab="tasks">📋 Tasks</button>
-      <button class="navtab" data-tab="sessions">🖥 Sessions</button>
-      <button class="navtab" data-tab="agents">🐔 Agents</button>
+    <nav class="topnav" id="topnav" aria-label="Farm sections">
+      <button id="nav-tasks" class="navtab active" data-tab="tasks" aria-controls="tab-tasks" aria-pressed="true">📋 Tasks</button>
+      <button id="nav-jobs" class="navtab" data-tab="jobs" aria-controls="tab-jobs" aria-pressed="false">📚 Jobs</button>
+      <button id="nav-sessions" class="navtab" data-tab="sessions" aria-controls="tab-sessions" aria-pressed="false">🖥 Sessions</button>
+      <button id="nav-agents" class="navtab" data-tab="agents" aria-controls="tab-agents" aria-pressed="false">🐔 Agents</button>
     </nav>
-    <span class="pill" id="savings-pill" title="Estimated savings from delegated work">💰 <span id="savings-text">$0 · 0 min</span></span>
     <span class="pill" id="status-pill"><span class="dot"></span><span id="status-text">connecting…</span></span>
-    <button id="btn-config" class="cfg-btn" title="Settings">⚙️</button>
+    <button id="btn-config" class="cfg-btn" title="Settings" aria-label="Farm settings">⚙️</button>
   </header>
+  <div class="sync-bar" id="sync-bar">
+    <span class="sync-message" id="sync-message" role="status" aria-live="polite">Connecting to the farm…</span>
+    <a id="sign-in-link" href="/login" target="_blank" rel="noopener" hidden>Sign in in a new tab</a>
+    <button class="ops-btn" id="sync-refresh">Reconnect / refresh</button>
+  </div>
+  <div class="action-notice" id="action-notice" hidden>
+    <span id="action-error" role="alert"></span>
+    <button class="ops-btn" id="notice-dismiss" aria-label="Dismiss action error">Dismiss</button>
+  </div>
 
-  <main class="tabview" id="tab-agents" hidden>
+  <main class="tabview" id="tab-agents" aria-labelledby="nav-agents" hidden>
     <aside>
       <div class="raise-bar">
         <button id="btn-raise">🥚  Raise new chicken</button>
@@ -1328,53 +1475,54 @@
           <div class="actions">
             <button class="primary" id="dc-chat">💬 Chat</button>
             <button id="dc-shell">🖥  Open shell</button>
-            <button id="dc-sleep">💤 Sleep</button>
-            <button id="dc-wake">🌅 Wake</button>
-            <button class="danger" id="dc-delete">🗑  Cull</button>
+            <button id="dc-sleep" aria-describedby="dc-lifecycle-hint">💤 Sleep</button>
+            <button id="dc-wake" aria-describedby="dc-lifecycle-hint">🌅 Wake</button>
+            <button class="danger" id="dc-delete" aria-describedby="dc-lifecycle-hint">🗑  Cull</button>
           </div>
+          <p class="muted" id="dc-lifecycle-hint" style="font-size:12px">
+            Lifecycle changes do not interrupt running jobs. Sleep and wake are refused during a run;
+            culling is also refused while jobs are queued.
+          </p>
           <div class="dc-login" id="dc-login" hidden>
             <h4>🔑 Agent &amp; login</h4>
             <div class="row" id="dc-login-actions"></div>
             <div class="vault-row" id="dc-vault-row" hidden>
-              <input type="password" id="dc-vault-key" placeholder="paste API key" autocomplete="off" />
+              <input type="password" id="dc-vault-key" aria-label="API key to save in the vault" placeholder="paste API key" autocomplete="off" />
               <button id="dc-vault-save">Save to vault</button>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Toast for job feedback -->
-      <div class="toast" id="toast"></div>
-
       <!-- Bottom command bar (appears when a chicken is selected) -->
       <div class="cmd-bar" id="cmd-bar">
         <div class="row">
           <span class="target" id="cmd-target">🐔 nobody</span>
           <div class="chips" id="cmd-chips">
-            <span class="chip" data-prompt="Summarize the contents of README.md">📄 Summarize README</span>
-            <span class="chip" data-prompt="List files in the current directory">📁 List files</span>
-            <span class="chip" data-prompt="Run cargo test and report results">🧪 Run tests</span>
-            <span class="chip" data-prompt="What is the current git status?">🌿 git status</span>
+            <button class="chip" data-prompt="Summarize the contents of README.md">📄 Summarize README</button>
+            <button class="chip" data-prompt="List files in the current directory">📁 List files</button>
+            <button class="chip" data-prompt="Run cargo test and report results">🧪 Run tests</button>
+            <button class="chip" data-prompt="What is the current git status?">🌿 git status</button>
           </div>
           <button class="close-x" id="cmd-close" title="Close">✕</button>
         </div>
         <div class="chat-log" id="cmd-log"></div>
         <div class="row">
-          <input type="text" id="cmd-input" placeholder="Tell the chicken what to do… (e.g. 'analyze this log file')" />
+          <input type="text" id="cmd-input" aria-label="Job prompt for the selected hen" placeholder="Tell the chicken what to do… (e.g. 'analyze this log file')" />
           <button class="send" id="cmd-send">Send 🪶</button>
         </div>
       </div>
 
       <!-- Right-click context menu -->
       <div class="ctx-menu" id="ctx-menu">
-        <div class="item" data-act="task">💼  Give task…</div>
-        <div class="item" data-act="inspect">🔍  Inspect</div>
-        <div class="item" data-act="shell">🖥  Open shell</div>
+        <button class="item" data-act="task">💼  Give job…</button>
+        <button class="item" data-act="inspect">🔍  Inspect</button>
+        <button class="item" data-act="shell">🖥  Open shell</button>
         <div class="sep"></div>
-        <div class="item" data-act="sleep">💤  Send to nest</div>
-        <div class="item" data-act="wake">🌅  Wake up</div>
+        <button class="item" data-act="sleep">💤  Send to nest</button>
+        <button class="item" data-act="wake">🌅  Wake up</button>
         <div class="sep"></div>
-        <div class="item danger" data-act="cull">🗑  Cull</div>
+        <button class="item danger" data-act="cull">🗑  Cull</button>
       </div>
     </section>
   </main>
@@ -1384,12 +1532,12 @@
        that streams a persistent tmux session. The agent CLI (codex/claude/
        gh copilot/bash) running INSIDE tmux owns all interaction UX —
        this UI deliberately ships zero chat/blocks/composer chrome.        -->
-  <main class="tabview" id="tab-sessions" hidden>
+  <main class="tabview" id="tab-sessions" aria-labelledby="nav-sessions" hidden>
     <section class="console">
       <div class="console-head">
         <div class="sess-tabs" id="sess-tabs"></div>
         <div class="head-actions">
-          <select id="open-hen-select" title="Attach a hen's tmux session"></select>
+          <select id="open-hen-select" title="Attach a hen's tmux session" aria-label="Hen session to attach"></select>
           <button class="ghost-btn" id="open-hen-btn">+ Attach</button>
           <button class="ghost-btn" id="tmux-detach" title="Detach (Ctrl-b d)">detach</button>
           <button class="ghost-btn" id="tmux-newwin" title="New tmux window (Ctrl-b c)">+ win</button>
@@ -1417,31 +1565,124 @@
   <!-- ============================== TASKS TAB ============================== -->
   <!-- Farm-wide task queue. Each task gets routed to a matching CLI-agent
        hen and delivered into that hen's tmux session via send-keys. -->
-  <main class="tabview" id="tab-tasks">
+  <main class="tabview" id="tab-tasks" aria-labelledby="nav-tasks">
     <section class="tasks-pane">
       <div class="tasks-composer">
         <h2>📋 Farm-wide tasks</h2>
-        <p class="muted">Submit a task — the first idle hen with a matching
-           agent kind picks it up. Use <b>Any CLI agent</b> to let the queue
-           pick whichever (claude / codex / gh-copilot) is available.</p>
+        <p class="muted">Send text to a matching CLI hen's tmux session.
+           <b>DISPATCHED means delivered, not finished</b> — check Sessions, then mark done.
+           This queue lasts for the daemon's lifetime; durable in-process runs are in <b>Jobs</b>.</p>
         <div class="task-row">
-          <select id="task-kind">
+          <select id="task-kind" aria-label="Required CLI agent kind">
             <option value="">Any CLI agent</option>
             <option value="claude-code">claude-code</option>
             <option value="codex">codex</option>
             <option value="gh-copilot">gh-copilot</option>
             <option value="shell">shell (raw)</option>
           </select>
-          <input id="task-prompt" type="text" placeholder="e.g. summarize the README and write a one-paragraph TLDR" />
-          <button id="task-submit" class="primary">Dispatch</button>
+          <input id="task-prompt" type="text" aria-label="Task prompt" placeholder="e.g. summarize the README and write a one-paragraph TLDR" />
+          <button id="task-submit" class="primary" data-mutation-key="task-submit">Dispatch</button>
         </div>
-        <div class="error" id="task-error"></div>
+        <div class="error" id="task-error" role="alert"></div>
+        <p class="jobs-meta" id="tasks-sync" role="status">Tasks have not synced yet.</p>
+        <button class="ops-btn" id="tasks-refresh">Refresh tasks</button>
       </div>
       <div class="tasks-list" id="tasks-list">
-        <div class="tasks-empty">No tasks yet.</div>
+        <div class="tasks-empty">Loading tasks…</div>
       </div>
     </section>
   </main>
+
+  <main class="tabview" id="tab-jobs" aria-labelledby="nav-jobs" hidden>
+    <section class="jobs-pane">
+      <div class="jobs-heading">
+        <h2>📚 Job history</h2>
+        <button class="ops-btn" id="jobs-refresh">Refresh jobs</button>
+      </div>
+      <p class="jobs-intro">Durable runs assigned to a Hen, including prompts, results and failures.
+        To submit a job, open a Hen's Chat in Agents. Jobs are separate from the tmux Tasks queue.
+        Only queued jobs can be cancelled; running jobs cannot be interrupted here.</p>
+      <form class="jobs-filters" id="jobs-filters">
+        <label class="search-field" for="jobs-search">Search prompt, result, error, Hen or job ID
+          <input type="search" id="jobs-search" maxlength="256" placeholder="Search history…" aria-describedby="jobs-search-help" />
+        </label>
+        <label for="jobs-status">State
+          <select id="jobs-status">
+            <option value="">All states</option>
+            <option value="QUEUED">Queued</option><option value="RUNNING">Running</option>
+            <option value="DONE">Done</option><option value="FAILED">Failed</option>
+            <option value="CANCELLED">Cancelled</option>
+          </select>
+        </label>
+        <label for="jobs-hen">Hen
+          <select id="jobs-hen"><option value="">All Hens</option></select>
+        </label>
+        <button type="submit" class="ops-btn primary">Apply filters</button>
+        <button type="button" class="ops-btn" id="jobs-clear">Clear</button>
+        <span class="sr-only" id="jobs-search-help">Search is limited to 256 UTF-8 bytes.</span>
+      </form>
+      <p class="error" id="jobs-error" role="alert" hidden></p>
+      <p class="jobs-meta" id="jobs-sync" role="status" aria-live="polite">Jobs have not synced yet.</p>
+      <div class="jobs-layout">
+        <div>
+          <p class="jobs-meta" id="jobs-query-label">All Hens · all states · newest first</p>
+          <div class="jobs-empty" id="jobs-empty">Loading job history…</div>
+          <ol class="jobs-list" id="jobs-list" aria-label="Loaded jobs" aria-busy="false"></ol>
+          <div class="jobs-pagination">
+            <button class="ops-btn" id="jobs-prev" disabled>← Previous</button>
+            <span id="jobs-count">No page loaded</span>
+            <button class="ops-btn" id="jobs-next" disabled>Next →</button>
+          </div>
+        </div>
+        <p class="job-detail-empty" id="job-detail-empty">Choose a job to read its prompt and result.
+          The selected job stays open when you refresh, filter or change pages.</p>
+        <article class="job-detail" id="job-detail" aria-labelledby="job-detail-title" hidden>
+          <div class="job-detail-head">
+            <h3 id="job-detail-title" tabindex="-1">Job details</h3>
+            <button class="ops-btn" id="job-copy-link">Copy link</button>
+            <button class="ops-btn" id="job-close" aria-label="Close job details">✕</button>
+          </div>
+          <div class="job-detail-body">
+            <p id="job-detail-sync" class="jobs-meta" role="status"></p>
+            <p id="job-detail-error" class="error" role="alert" hidden></p>
+            <p class="muted" id="job-outside-page" hidden>This selected job is not on the loaded page.</p>
+            <dl>
+              <dt>Job ID</dt><dd><code id="job-id"></code></dd>
+              <dt>Hen</dt><dd id="job-hen"></dd>
+              <dt>State</dt><dd><span class="job-status" id="job-state"></span></dd>
+              <dt>Created</dt><dd><time id="job-created"></time></dd>
+              <dt>Updated</dt><dd><time id="job-updated"></time></dd>
+              <dt id="job-turns-label" hidden>Recorded turns</dt><dd id="job-turns" hidden></dd>
+              <dt id="job-cost-label" hidden>Recorded Grain spent</dt><dd id="job-cost" hidden></dd>
+              <dt id="job-retry-label" hidden>Retry of</dt><dd id="job-retry-parent" hidden><button class="ops-btn" id="job-parent"></button></dd>
+            </dl>
+            <div class="job-actions">
+              <button class="ops-btn" id="job-reload">Refresh detail</button>
+              <button class="ops-btn primary" id="job-retry" hidden>Retry as new job</button>
+              <button class="ops-btn danger" id="job-cancel" hidden>Cancel queued job</button>
+              <span class="muted" id="job-action-hint"></span>
+            </div>
+            <details id="job-prompt-section" open>
+              <summary>Prompt</summary>
+              <div class="copy-row"><button class="ops-btn" id="job-copy-prompt">Copy prompt</button></div>
+              <pre class="job-text" id="job-prompt" tabindex="0"></pre>
+            </details>
+            <details id="job-result-section" open hidden>
+              <summary>Result</summary>
+              <div class="copy-row"><button class="ops-btn" id="job-copy-result">Copy result</button></div>
+              <pre class="job-text" id="job-result" tabindex="0"></pre>
+            </details>
+            <details id="job-error-section" open hidden>
+              <summary>Error</summary>
+              <div class="copy-row"><button class="ops-btn" id="job-copy-error">Copy error</button></div>
+              <pre class="job-text error" id="job-error" tabindex="0"></pre>
+            </details>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <!-- Shell overlay -->
   <div class="shell-overlay" id="shell-overlay">
@@ -1512,7 +1753,7 @@
       <label for="f-prompt">System prompt <span style="text-transform:none;font-size:11px;color:var(--muted);font-weight:400">(optional)</span></label>
       <textarea id="f-prompt" placeholder="You are a helpful coding assistant living in a sandboxed workdir…"></textarea>
 
-      <div class="error" id="raise-error"></div>
+      <div class="error" id="raise-error" role="alert"></div>
 
       <div class="modal-actions">
         <button id="btn-cancel">Cancel</button>
@@ -1566,7 +1807,7 @@
         </p>
       </div>
 
-      <div class="error" id="cfg-error"></div>
+      <div class="error" id="cfg-error" role="alert"></div>
 
       <div class="modal-actions">
         <button id="btn-cfg-cancel">Close</button>
@@ -1585,6 +1826,7 @@
     const API = location.origin;
     const WS_PROTO = location.protocol === 'https:' ? 'wss:' : 'ws:';
     let chickens = [];
+    let hensLoaded = false;
     let activeId = null;
     let term = null, fit = null, ws = null;
 
@@ -1592,8 +1834,203 @@
     const esc = s => String(s).replace(/[&<>"']/g, c =>
       ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
+    const JOB_STATES = new Set(['QUEUED', 'RUNNING', 'DONE', 'FAILED', 'CANCELLED']);
+    const MAX_JSON_BYTES = 8 * 1024 * 1024;
+    const REQUEST_TIMEOUT_MS = 15000;
+    const pendingMutations = new Set();
+    const syncIssues = new Map();
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let sessionExpired = false;
+    let farmInfo = null;
+    let lastFarmSync = 0;
+    let lastFarmAttempt = 0;
+    let farmSyncPromise = null;
+    let farmSyncAgain = false;
+    let syncTimer = null;
+    let watchSocket = null;
+    let watchTimer = null;
+    let watchRetryMs = 2000;
+
+    class ApiError extends Error {
+      constructor(message, status = 0, uncertain = false) {
+        super(message);
+        this.status = status;
+        this.uncertain = uncertain;
+      }
+    }
+    function setText(id, value) {
+      const el = $(id);
+      const text = String(value ?? '');
+      if (el.textContent !== text) el.textContent = text;
+    }
+    function setIssue(key, error) {
+      if (error) syncIssues.set(key, error.message || String(error));
+      else syncIssues.delete(key);
+      renderSyncStatus();
+    }
+    function showActionError(error, targetId) {
+      const message = error.message || String(error);
+      setText('action-error', message);
+      $('action-notice').hidden = false;
+      if (targetId) {
+        setText(targetId, message);
+        $(targetId).hidden = false;
+      }
+    }
+    function formatTime(value) {
+      const date = new Date(value);
+      return value && Number.isFinite(date.getTime())
+        ? date.toLocaleString(undefined, { timeZoneName: 'short' }) : 'Not recorded';
+    }
+    function renderSyncStatus() {
+      const offline = navigator.onLine === false;
+      const stale = syncIssues.size > 0 || (lastFarmSync > 0 && Date.now() - lastFarmSync > 65000);
+      const last = lastFarmSync ? `Last farm sync: ${formatTime(lastFarmSync)}.` : 'No successful farm sync yet.';
+      let message = last;
+      let title = farmInfo ? `${farmInfo.hen_count} chickens` : 'Connecting…';
+      if (sessionExpired) {
+        title = 'Sign-in required';
+        message = `Session expired. Sign in in another tab, then reconnect here. Unsent input is kept. ${last}`;
+      } else if (offline) {
+        title = 'Offline';
+        message = `Offline — showing last known data. ${last}`;
+      } else if (stale) {
+        title = 'Stale data';
+        message = `${syncIssues.values().next().value || 'Sync is overdue'} · Last known data is kept. ${last}`;
+      } else if (!watchSocket || watchSocket.readyState !== WebSocket.OPEN) {
+        message += ' Live events disconnected; periodic refresh remains enabled.';
+      }
+      setText('status-text', title);
+      setText('sync-message', message);
+      $('status-pill').classList.toggle('offline', offline || stale || sessionExpired);
+      $('sync-bar').classList.toggle('stale', offline || stale || sessionExpired);
+      $('sign-in-link').hidden = !sessionExpired;
+      $('sync-refresh').disabled = !!farmSyncPromise;
+    }
+    function expireSession() {
+      sessionExpired = true;
+      stopWatch();
+      renderSyncStatus();
+      refreshMutationButtons();
+    }
+
+    async function readBoundedJson(response) {
+      const declared = Number(response.headers.get('content-length'));
+      if (declared > MAX_JSON_BYTES) throw new ApiError('Response is too large. Narrow the job search or filter by Hen/state.');
+      const reader = response.body && response.body.getReader();
+      if (!reader) throw new ApiError('Empty JSON response from the daemon.');
+      const decoder = new TextDecoder();
+      const parts = [];
+      let bytes = 0;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          bytes += value.byteLength;
+          if (bytes > MAX_JSON_BYTES) throw new ApiError('Response is too large. Narrow the job search or filter by Hen/state.');
+          parts.push(decoder.decode(value, { stream: true }));
+        }
+        parts.push(decoder.decode());
+        try { return JSON.parse(parts.join('')); }
+        catch { throw new ApiError('The daemon returned invalid JSON. Last known data is kept.'); }
+      } finally {
+        reader.releaseLock();
+      }
+    }
+    // All HTTP calls use the existing same-origin auth cookie, never a token in JS or a URL.
+    async function requestJSON(path, { method = 'GET', body, contentType, empty = false, validate } = {}) {
+      if (sessionExpired) throw new ApiError('Session expired. Sign in in another tab, then reconnect here.', 401);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      const mutation = method !== 'GET';
+      try {
+        const headers = { Accept: 'application/json' };
+        if (body !== undefined) headers['Content-Type'] = contentType || 'application/json';
+        const response = await fetch(API + path, {
+          method, headers, credentials: 'same-origin', cache: 'no-store',
+          signal: controller.signal,
+          body: body === undefined ? undefined : (contentType ? body : JSON.stringify(body)),
+        });
+        if (response.status === 401 || (response.redirected && new URL(response.url).pathname === '/login')) {
+          expireSession();
+          throw new ApiError('Session expired. Sign in in another tab, then reconnect here.', 401);
+        }
+        if (response.status === 204 && response.ok && empty) return null;
+        const jsonType = /(?:application\/json|application\/[^;]+\+json)(?:;|$)/i;
+        if (!jsonType.test(response.headers.get('content-type') || '')) {
+          throw new ApiError(`HTTP ${response.status}: expected JSON, not a login or proxy page.`, response.status, mutation && response.ok);
+        }
+        const data = await readBoundedJson(response);
+        if (!response.ok) {
+          const detail = typeof data?.error === 'string' ? data.error : typeof data?.message === 'string' ? data.message : response.statusText;
+          throw new ApiError(`HTTP ${response.status}: ${String(detail || 'Request failed').slice(0, 600)}`, response.status);
+        }
+        if (validate && !validate(data)) throw new ApiError('Unexpected response from the daemon.', response.status, mutation);
+        return data;
+      } catch (error) {
+        if (error instanceof ApiError) {
+          if (mutation && (error.uncertain || !error.status)) {
+            error.message += ' The action may have reached the daemon; refresh before trying again.';
+            error.uncertain = true;
+          }
+          throw error;
+        }
+        const message = controller.signal.aborted
+          ? 'Request timed out.' : 'Cannot reach the daemon. Check the connection.';
+        const failure = new ApiError(message + (mutation ? ' The action may have reached the daemon; refresh before trying again.' : ''), 0, mutation);
+        setIssue('connection', failure);
+        throw failure;
+      } finally {
+        clearTimeout(timer);
+        controller.abort();
+      }
+    }
+    const validJob = j => !!j && typeof j.id === 'string' && typeof j.hen_id === 'string'
+      && typeof j.prompt === 'string' && JOB_STATES.has(j.status)
+      && typeof j.created_at === 'string' && typeof j.updated_at === 'string';
+    const validJobs = jobs => Array.isArray(jobs) && jobs.every(validJob);
+    const terminalJob = j => !!j && ['DONE', 'FAILED', 'CANCELLED'].includes(j.status);
+    const validJobReceipt = data => !!data && typeof data.job_id === 'string' && data.job_id.length > 0;
+    const validOk = data => data?.ok === true;
+
+    function refreshMutationButtons() {
+      for (const button of document.querySelectorAll('[data-mutation-key]')) {
+        button.disabled = sessionExpired || pendingMutations.has(button.dataset.mutationKey);
+      }
+    }
+    async function mutate(key, operation, targetId) {
+      if (pendingMutations.has(key)) return false;
+      if (sessionExpired) {
+        showActionError(new ApiError('Sign in in another tab, then reconnect before making changes.'), targetId);
+        return false;
+      }
+      pendingMutations.add(key);
+      refreshMutationButtons();
+      if (targetId) setText(targetId, '');
+      try {
+        await operation();
+        return true;
+      } catch (error) {
+        showActionError(error, targetId);
+        return false;
+      } finally {
+        pendingMutations.delete(key);
+        refreshMutationButtons();
+      }
+    }
+    async function copyText(text, label) {
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error('Clipboard is unavailable. Select and copy the text manually, or use HTTPS/localhost.');
+        await navigator.clipboard.writeText(String(text));
+        showToast(`${label} copied`);
+      } catch (error) {
+        showActionError(new Error(`Could not copy ${label.toLowerCase()}: ${error.message}`));
+      }
+    }
+    $('notice-dismiss').onclick = () => { $('action-notice').hidden = true; };
+
     function chickenEmoji(c) {
-      const sex = (c.manifest && c.manifest.sex) || 'hen';
+      const sex = c.manifest?.sex === 'rooster' ? 'rooster' : 'hen';
       const state = (c.state || '').toLowerCase();
       if (state === 'defined' || state === 'hatching') return '🥚';
       return sex === 'rooster' ? '🐓' : '🐔';
@@ -1603,7 +2040,7 @@
     // Hens: cream body, modest comb. Roosters: bronze body, big crown comb + tail.
     // Each piece is its own <g> so per-state CSS can animate head/wing/legs/tail.
     function chickenSvg(c) {
-      const sex = (c.manifest && c.manifest.sex) || 'hen';
+      const sex = c.manifest?.sex === 'rooster' ? 'rooster' : 'hen';
       const state = (c.state || '').toLowerCase();
       if (state === 'defined' || state === 'hatching') {
         return '<span class="body egg-emoji" data-body-key="'+sex+'|egg">🥚</span>';
@@ -1690,101 +2127,95 @@
       return '';
     }
 
-    async function fetchAll() {
-      try {
-        const [farmR, hensR, jobsR] = await Promise.all([
-          fetch(`${API}/api/v1/farm`),
-          fetch(`${API}/api/v1/hens`),
-          fetch(`${API}/api/v1/jobs`),
+    function fetchAll() {
+      if (sessionExpired || navigator.onLine === false) return Promise.resolve();
+      if (farmSyncPromise) { farmSyncAgain = true; return farmSyncPromise; }
+      lastFarmAttempt = Date.now();
+      farmSyncPromise = (async () => {
+        const results = await Promise.allSettled([
+          requestJSON('/api/v1/farm', { validate: f => !!f && typeof f.coop_id === 'string' && Number.isInteger(f.hen_count) }),
+          requestJSON('/api/v1/hens', { validate: hens => Array.isArray(hens) && hens.every(h => h && typeof h.id === 'string' && typeof h.state === 'string' && h.manifest?.brain) }),
+          requestJSON('/api/v1/readyz', { validate: validOk }),
         ]);
-        const farm = await farmR.json();
-        chickens = await hensR.json();
-        chickens.sort((a, b) => a.id.localeCompare(b.id));
-        // build job map: keep newest active job per hen
-        const jobs = jobsR.ok ? await jobsR.json() : [];
-        const next = {};
-        for (const j of jobs) {
-          const hid = j.hen_id || j.henId;
-          const stat = (j.status || '').toLowerCase();
-          if (!hid) continue;
-          if (stat === 'completed' || stat === 'failed' || stat === 'cancelled') continue;
-          if (!next[hid]) next[hid] = { prompt: j.prompt || j.input || '', status: stat };
+        const [farm, hens] = results;
+        if (farm.status === 'fulfilled') {
+          farmInfo = farm.value;
+          setText('farm-id', `· ${farmInfo.coop_id} · v${farmInfo.coopd_version}`);
         }
-        // detect job completions vs lastJobs for toast
-        for (const hid in lastJobs) {
-          if (!next[hid] && lastJobs[hid]) {
-            const short = lastJobs[hid].prompt.slice(0, 36);
-            const name  = hid.split('/').pop();
-            showToast(`✅ ${name} finished: "${short}${lastJobs[hid].prompt.length>36?'…':''}"`);
+        if (hens.status === 'fulfilled') {
+          hensLoaded = true;
+          chickens = hens.value.sort((a, b) => a.id.localeCompare(b.id));
+          renderFlock();
+          renderYard();
+          if (activeId) {
+            const selected = chickens.find(c => c.id === activeId);
+            if (selected) renderDetail(selected);
+            else $('dc-close').click();
           }
+          refreshCmdTarget();
+          refreshOpenHenSelect();
+          renderHenFilter();
         }
-        // push completed/failed job results into per-hen chat history (once each)
-        for (const j of jobs) {
-          const hid = j.hen_id || j.henId;
-          const stat = (j.status || '').toLowerCase();
-          const jid  = j.id || j.job_id || j.jobId;
-          if (!hid || !jid) continue;
-          if (seenJobReplies.has(jid)) continue;
-          if (stat === 'completed' || stat === 'failed' || stat === 'cancelled') {
-            let body = j.result || j.output || j.error ||
-              (stat === 'completed' ? '✓ done' : stat === 'failed' ? '⚠ failed' : '🚫 cancelled');
-            body = humanizeBrainError(String(body));
-            pushChat(hid, 'hen', body.slice(0, 800),
-                     stat === 'completed' ? null : 'error');
-            seenJobReplies.add(jid);
-          }
+        const failure = results.find(r => r.status === 'rejected');
+        if (failure) setIssue('farm', failure.reason);
+        else {
+          lastFarmSync = Date.now();
+          setIssue('farm', null);
+          setIssue('connection', null);
         }
-        lastJobs = next;
-        currentJobs = next;
-        allJobs = jobs;
-        renderTasks();
-        if (typeof refreshOpenHenSelect === 'function') refreshOpenHenSelect();
-
-        // Estimated savings: assume each successful job saves ~5 min of human work
-        // and costs ~$0.01/turn. (Heuristic, intentionally rough.)
-        try {
-          const done = jobs.filter(j => (j.status||'').toLowerCase() === 'completed');
-          const minSaved = done.length * 5;
-          const dollarsSpent = jobs.reduce((s,j) => s + ((j.turns||0) * 0.01), 0);
-          const sav = $('savings-text');
-          if (sav) sav.textContent = `$${dollarsSpent.toFixed(2)} · ${minSaved} min`;
-        } catch (_) {}
-
-        $('farm-id').textContent = `· ${farm.coop_id} · v${farm.coopd_version}`;
-        $('status-pill').classList.remove('offline');
-        $('status-text').textContent = `${farm.hen_count} chickens`;
-        renderFlock();
-        renderYard();
-        if (activeId) renderDetail(chickens.find(c => c.id === activeId));
-        refreshCmdTarget();
-      } catch (e) {
-        $('status-pill').classList.add('offline');
-        $('status-text').textContent = 'coopd unreachable';
-      }
+        if (!sessionExpired) {
+          await Promise.all([
+            syncJobTracking(),
+            activeTab === 'tasks' || syncIssues.has('tasks') ? refreshTasks() : Promise.resolve(),
+            activeTab === 'jobs' || syncIssues.has('jobs') ? refreshJobs() : Promise.resolve(),
+            selectedJobId && (activeTab === 'jobs' || syncIssues.has('job-detail')) ? refreshSelectedJob() : Promise.resolve(),
+          ]);
+        }
+      })().catch(error => setIssue('farm', error)).finally(() => {
+        farmSyncPromise = null;
+        renderSyncStatus();
+        if (farmSyncAgain) {
+          farmSyncAgain = false;
+          scheduleSync();
+        }
+      });
+      renderSyncStatus();
+      return farmSyncPromise;
     }
 
     function renderFlock() {
       const list = $('flock-list');
-      list.innerHTML = '';
       if (!chickens.length) {
-        list.innerHTML = `<div style="padding:14px 12px;color:var(--muted);font-size:12px">No chickens yet. Hatch one above.</div>`;
+        const empty = `<div style="padding:14px 12px;color:var(--muted);font-size:12px">${hensLoaded ? 'No chickens yet. Hatch one above.' : 'The flock has not loaded yet. Check the connection status above.'}</div>`;
+        if (list.innerHTML !== empty) list.innerHTML = empty;
         return;
       }
-      for (const c of chickens) {
-        const sex = (c.manifest && c.manifest.sex) || 'hen';
-        const row = document.createElement('div');
+      const ids = new Set(chickens.map(c => c.id));
+      for (const row of [...list.children]) if (!ids.has(row.dataset.henId)) row.remove();
+      chickens.forEach((c, index) => {
+        const sex = c.manifest?.sex === 'rooster' ? 'rooster' : 'hen';
+        let row = [...list.children].find(el => el.dataset.henId === c.id);
+        if (!row) {
+          row = document.createElement('button');
+          row.dataset.henId = c.id;
+          row.onclick = () => select(c.id);
+        }
         row.className = 'chick' + (activeId === c.id ? ' active' : '');
-        row.innerHTML = `
-          <div class="avatar ${sex}">${chickenEmoji(c)}</div>
-          <div class="meta">
-            <div class="name">${esc(c.id.split('/').pop())}</div>
-            <div class="sub">${sex === 'rooster' ? '🐓 rooster' : '🐔 hen'} · ${esc(c.id)}</div>
-          </div>
-          <span class="badge ${c.state.toLowerCase()}">${c.state}</span>
-        `;
-        row.onclick = () => select(c.id);
-        list.appendChild(row);
-      }
+        row.setAttribute('aria-pressed', String(activeId === c.id));
+        const signature = JSON.stringify([c.id, sex, c.state]);
+        if (row.dataset.signature !== signature) {
+          row.dataset.signature = signature;
+          row.innerHTML = `
+            <span class="avatar ${sex}">${chickenEmoji(c)}</span>
+            <span class="meta">
+              <span class="name">${esc(c.id.split('/').pop())}</span>
+              <span class="sub">${sex === 'rooster' ? '🐓 rooster' : '🐔 hen'} · ${esc(c.id)}</span>
+            </span>
+            <span class="badge ${esc(c.state.toLowerCase())}">${esc(c.state)}</span>
+          `;
+        }
+        if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null);
+      });
     }
 
     /* ====================================================================
@@ -1811,18 +2242,16 @@
     };
     let stageW = 0, stageH = 0;
     let currentJobs = {};      // hen_id -> {prompt, status}
-    let lastJobs   = {};       // for detecting completions
-    let allJobs    = [];       // full /jobs payload, newest-first by created_at
     let activeTab  = 'tasks';
     // (legacy task filters removed — see Console block filter below)
     let isNight = false;
     let chatHistory = {};      // hen_id -> [{who:'user'|'hen', text, status?}]
     const seenJobReplies = new Set();
     const CHAT_MAX = 20;
-    function pushChat(id, who, text, status) {
+    function pushChat(id, who, text, status, jobId) {
       if (!id) return;
       const arr = chatHistory[id] || (chatHistory[id] = []);
-      arr.push({ who, text, status });
+      arr.push({ who, text, status, jobId });
       if (arr.length > CHAT_MAX) arr.splice(0, arr.length - CHAT_MAX);
       if (cmdTargetId === id) renderChatLog();
     }
@@ -1831,7 +2260,7 @@
       if (!box) return;
       const arr = (cmdTargetId && chatHistory[cmdTargetId]) || [];
       box.innerHTML = arr.map(m => `
-        <div class="chat-msg ${m.who}${m.status ? ' '+m.status : ''}">
+        <div class="chat-msg ${esc(m.who)}${m.status ? ' '+esc(m.status) : ''}">
           <span class="who">${m.who === 'user' ? 'you' : '🐔'}</span>
           <span class="body">${esc(m.text)}</span>
         </div>`).join('');
@@ -1856,6 +2285,388 @@
         if (j && (j.error || j.message)) return String(j.error || j.message);
       } catch (_) {}
       return raw;
+    }
+
+    // Durable history is a bounded page, not the source of truth for active jobs.
+    const JOB_PAGE_SIZE = 50;
+    let jobsQuery = { q: '', status: '', hen: '', offset: 0 };
+    let jobsPage = null;
+    let jobsLoading = false;
+    let jobsError = '';
+    let jobsPromise = null;
+    let jobsAgain = false;
+    let selectedJobId = null;
+    let selectedJob = null;
+    let selectedJobSync = 0;
+    let selectedJobError = '';
+    const jobCache = new Map();
+    const trackedJobs = new Map();
+    const pendingJobIds = new Set();
+    const jobRequests = new Map();
+    let trackingPromise = null;
+
+    function jobsQueryString(query) {
+      const params = new URLSearchParams({ limit: String(JOB_PAGE_SIZE + 1), offset: String(query.offset), order: 'desc' });
+      if (query.q) params.set('q', query.q);
+      if (query.status) params.set('status', query.status);
+      if (query.hen) params.set('hen_id', query.hen);
+      return params.toString();
+    }
+    function summarizePrompt(prompt) {
+      const compact = prompt.replace(/\s+/g, ' ').trim();
+      return compact.length > 160 ? compact.slice(0, 159) + '…' : compact || '(Empty prompt)';
+    }
+    function rememberJob(job, notify = false) {
+      const previous = jobCache.get(job.id) || (selectedJobId === job.id && selectedJob)
+        || trackedJobs.get(job.id) || jobsPage?.items.find(j => j.id === job.id);
+      // An in-flight page response must not undo a newer event/detail response.
+      if (previous && (Date.parse(previous.updated_at) > Date.parse(job.updated_at)
+          || (terminalJob(previous) && !terminalJob(job)))) job = previous;
+      const wasTracked = trackedJobs.has(job.id);
+      jobCache.delete(job.id);
+      jobCache.set(job.id, job);
+      if (jobsPage) {
+        const index = jobsPage.items.findIndex(j => j.id === job.id);
+        if (index >= 0) jobsPage.items[index] = job;
+      }
+      if (terminalJob(job)) {
+        trackedJobs.delete(job.id);
+        if ((notify || wasTracked) && !seenJobReplies.has(job.id)) {
+          seenJobReplies.add(job.id);
+          if (seenJobReplies.size > 2000) seenJobReplies.delete(seenJobReplies.values().next().value);
+          const history = chatHistory[job.hen_id] || [];
+          chatHistory[job.hen_id] = history.filter(m => m.jobId !== job.id || m.status !== 'queued');
+          const body = job.result ?? job.error ?? (job.status === 'DONE' ? 'Done (no result text recorded).' : job.status);
+          pushChat(job.hen_id, 'hen', humanizeBrainError(String(body)).slice(0, 800), job.status === 'DONE' ? null : 'error');
+          showToast(`${job.status === 'DONE' ? '✅' : '⚠️'} ${job.hen_id.split('/').pop()} · ${job.status.toLowerCase()}`);
+        }
+      } else {
+        trackedJobs.set(job.id, job);
+      }
+      if (selectedJobId === job.id) {
+        selectedJob = job;
+        selectedJobSync = Date.now();
+      }
+      // Keep selection and active tracking independent of the small history cache.
+      while (jobCache.size > 250) jobCache.delete(jobCache.keys().next().value);
+      return job;
+    }
+    function getJobRecord(id) {
+      if (jobRequests.has(id)) return jobRequests.get(id);
+      const promise = requestJSON(`/api/v1/jobs/${encodeURIComponent(id)}`, { validate: job => validJob(job) && job.id === id })
+        .then(job => rememberJob(job))
+        .finally(() => jobRequests.delete(id));
+      jobRequests.set(id, promise);
+      return promise;
+    }
+    function paintJobUpdates() {
+      currentJobs = {};
+      for (const job of trackedJobs.values()) {
+        if (!job?.hen_id || terminalJob(job)) continue;
+        const previous = currentJobs[job.hen_id];
+        if (!previous || (job.status === 'RUNNING' && previous.status !== 'RUNNING')
+            || (job.status === previous.status && (job.created_at || '') > (previous.created_at || ''))) {
+          currentJobs[job.hen_id] = job;
+        }
+      }
+      renderJobsRows();
+      renderJobDetail();
+      renderYard();
+    }
+    function syncJobTracking() {
+      if (trackingPromise) return trackingPromise;
+      trackingPromise = (async () => {
+        // Active snapshots seed tracking even when an old job lies outside the history page.
+        const snapshots = await Promise.allSettled(['QUEUED', 'RUNNING'].map(status =>
+          requestJSON(`/api/v1/jobs?status=${status}&limit=500&offset=0&order=desc`, { validate: validJobs })));
+        const activeIds = new Set();
+        for (const snapshot of snapshots) {
+          if (snapshot.status !== 'fulfilled') continue;
+          for (const job of snapshot.value) {
+            activeIds.add(job.id);
+            rememberJob(job);
+          }
+        }
+        const ids = new Set(pendingJobIds);
+        if (snapshots.every(s => s.status === 'fulfilled')) {
+          for (const id of trackedJobs.keys()) if (!activeIds.has(id)) ids.add(id);
+        }
+        let failure = snapshots.find(s => s.status === 'rejected')?.reason;
+        const queue = [...ids];
+        // Resolve completions by ID, never by their disappearance from a limited page.
+        await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
+          while (queue.length && !sessionExpired) {
+            const id = queue.shift();
+            const notify = pendingJobIds.delete(id);
+            try { rememberJob(await getJobRecord(id), notify); }
+            catch (error) {
+              failure = error;
+              if (error.status === 404) trackedJobs.delete(id);
+              else pendingJobIds.add(id);
+            }
+          }
+        }));
+        setIssue('tracking', failure || null);
+        paintJobUpdates();
+      })().catch(error => setIssue('tracking', error)).finally(() => { trackingPromise = null; });
+      return trackingPromise;
+    }
+
+    function renderHenFilter() {
+      const select = $('jobs-hen');
+      const current = select.value;
+      const ids = new Set(chickens.map(c => c.id));
+      for (const job of jobsPage?.items || []) ids.add(job.hen_id);
+      if (selectedJob) ids.add(selectedJob.hen_id);
+      if (current) ids.add(current);
+      const options = '<option value="">All Hens</option>' + [...ids].sort().map(id =>
+        `<option value="${esc(id)}">${esc(id)}</option>`).join('');
+      if (select.dataset.options !== options) {
+        select.innerHTML = options;
+        select.dataset.options = options;
+        select.value = current;
+      }
+    }
+    function renderJobsRows() {
+      const list = $('jobs-list');
+      const items = jobsPage?.items || [];
+      const ids = new Set(items.map(j => j.id));
+      for (const row of [...list.children]) if (!ids.has(row.dataset.jobId)) row.remove();
+      items.forEach((stored, index) => {
+        const job = jobCache.get(stored.id) || stored;
+        let row = [...list.children].find(el => el.dataset.jobId === job.id);
+        if (!row) {
+          row = document.createElement('li');
+          row.dataset.jobId = job.id;
+          row.innerHTML = '<button class="job-open" type="button"><span class="job-row-top"><span class="job-hen"></span><span class="job-status"></span></span><span class="job-summary"></span><time class="job-time"></time></button>';
+          row.querySelector('button').onclick = () => selectJob(job.id, true);
+        }
+        const values = {
+          '.job-hen': job.hen_id, '.job-status': job.status,
+          '.job-summary': summarizePrompt(job.prompt), '.job-time': `Created ${formatTime(job.created_at)}`,
+        };
+        for (const [selector, text] of Object.entries(values)) {
+          const el = row.querySelector(selector);
+          if (el.textContent !== text) el.textContent = text;
+        }
+        row.querySelector('.job-status').className = `job-status ${job.status}`;
+        row.querySelector('time').dateTime = job.created_at;
+        const button = row.querySelector('button');
+        button.setAttribute('aria-pressed', String(selectedJobId === job.id));
+        button.setAttribute('aria-label', `${job.hen_id}, ${job.status}, ${summarizePrompt(job.prompt)}. Open job ${job.id}`);
+        if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null);
+      });
+      list.setAttribute('aria-busy', String(jobsLoading));
+      $('jobs-empty').hidden = items.length > 0;
+      setText('jobs-empty', !jobsPage
+        ? jobsLoading ? 'Loading job history…' : jobsError ? 'Job history could not be loaded. Refresh to try again.' : 'No history loaded yet.'
+        : jobsPage.query.offset ? 'No jobs on this page. Use Previous to return to earlier pages.'
+        : 'No jobs match these filters. Clear filters or submit a job from a Hen’s Chat in Agents.');
+    }
+    function renderJobsStatus() {
+      const sameQuery = jobsPage && jobsQueryString(jobsPage.query) === jobsQueryString(jobsQuery);
+      const last = jobsPage ? `Last jobs sync: ${formatTime(jobsPage.syncedAt)}.` : 'No successful jobs sync yet.';
+      setText('jobs-sync', `${jobsLoading ? 'Refreshing… ' : ''}${last}${jobsPage && !sameQuery ? ' Showing the previous page until the requested filters/page load successfully.' : ''}`);
+      setText('jobs-error', jobsError);
+      $('jobs-error').hidden = !jobsError;
+      $('jobs-refresh').disabled = jobsLoading;
+      $('jobs-prev').disabled = jobsLoading || !sameQuery || jobsQuery.offset === 0;
+      $('jobs-next').disabled = jobsLoading || !sameQuery || !jobsPage?.hasNext;
+      const query = jobsPage?.query || jobsQuery;
+      setText('jobs-query-label', `${query.hen || 'All Hens'} · ${query.status || 'all states'}${query.q ? ` · search: “${query.q}”` : ''} · newest first`);
+      const count = jobsPage?.items.length || 0;
+      setText('jobs-count', jobsPage
+        ? count ? `Showing ${query.offset + 1}–${query.offset + count} · ${count} loaded${jobsPage.hasNext ? ' · more available' : ''}` : '0 jobs on this page'
+        : 'No page loaded');
+      renderJobsRows();
+      renderJobDetail();
+    }
+    function refreshJobs(force = false) {
+      if (sessionExpired || navigator.onLine === false) return Promise.resolve();
+      if (jobsPromise) { if (force) jobsAgain = true; return jobsPromise; }
+      const query = { ...jobsQuery };
+      const key = jobsQueryString(query);
+      jobsLoading = true;
+      jobsError = '';
+      renderJobsStatus();
+      jobsPromise = requestJSON('/api/v1/jobs?' + key, { validate: validJobs }).then(items => {
+        if (key !== jobsQueryString(jobsQuery)) return;
+        items.forEach(job => rememberJob(job));
+        jobsPage = { items: items.slice(0, JOB_PAGE_SIZE).map(j => jobCache.get(j.id) || j), hasNext: items.length > JOB_PAGE_SIZE, query, syncedAt: Date.now() };
+        setIssue('jobs', null);
+        renderHenFilter();
+      }).catch(error => {
+        if (key === jobsQueryString(jobsQuery)) {
+          jobsError = `${error.message}${jobsPage ? ' The last successful page is still shown.' : ''}`;
+          setIssue('jobs', error);
+        }
+      }).finally(() => {
+        jobsPromise = null;
+        jobsLoading = false;
+        renderJobsStatus();
+        if (jobsAgain || key !== jobsQueryString(jobsQuery)) {
+          jobsAgain = false;
+          refreshJobs();
+        }
+      });
+      return jobsPromise;
+    }
+
+    function renderJobDetail() {
+      const job = selectedJob;
+      $('job-detail').hidden = !selectedJobId;
+      $('job-detail-empty').hidden = !!selectedJobId;
+      if (!selectedJobId) return;
+      setText('job-id', selectedJobId);
+      const loading = jobRequests.has(selectedJobId);
+      setText('job-detail-sync', `${loading ? 'Refreshing detail… ' : ''}${selectedJobSync ? `Last detail sync: ${formatTime(selectedJobSync)}.`
+        : job ? 'Showing cached job details.' : loading ? 'Loading selected job…' : 'No job detail has loaded yet. Use Refresh detail to try again.'}`);
+      setText('job-detail-error', selectedJobError);
+      $('job-detail-error').hidden = !selectedJobError;
+      $('job-outside-page').hidden = !jobsPage || jobsPage.items.some(j => j.id === selectedJobId);
+      setText('job-hen', job?.hen_id || '—');
+      setText('job-state', job?.status || '—');
+      $('job-state').className = 'job-status ' + (job?.status || '');
+      for (const field of ['created', 'updated']) {
+        const value = job?.[`${field}_at`];
+        setText(`job-${field}`, value ? formatTime(value) : '—');
+        $(`job-${field}`).dateTime = value || '';
+        $(`job-${field}`).title = value || '';
+      }
+      for (const [id, field] of [['turns', 'turns'], ['cost', 'grain_spent']]) {
+        const value = job?.[field];
+        const recorded = Number.isSafeInteger(value) && value > 0;
+        $(`job-${id}-label`).hidden = !recorded;
+        $(`job-${id}`).hidden = !recorded;
+        if (recorded) setText(`job-${id}`, value.toLocaleString());
+      }
+      const retryOf = typeof job?.retry_of === 'string' && job.retry_of;
+      $('job-retry-label').hidden = !retryOf;
+      $('job-retry-parent').hidden = !retryOf;
+      setText('job-parent', retryOf || '');
+      $('job-parent').onclick = () => retryOf && selectJob(retryOf, true);
+      setText('job-prompt', job?.prompt ?? '');
+      setText('job-result', job?.result ?? '');
+      setText('job-error', job?.error ?? '');
+      $('job-result-section').hidden = typeof job?.result !== 'string';
+      $('job-error-section').hidden = typeof job?.error !== 'string';
+      $('job-copy-prompt').disabled = !job;
+      $('job-copy-result').disabled = typeof job?.result !== 'string';
+      $('job-copy-error').disabled = typeof job?.error !== 'string';
+      $('job-reload').disabled = jobRequests.has(selectedJobId);
+      $('job-retry').hidden = !job || !['FAILED', 'CANCELLED'].includes(job.status);
+      $('job-cancel').hidden = job?.status !== 'QUEUED';
+      for (const id of ['job-retry', 'job-cancel']) $(id).dataset.mutationKey = `job:${selectedJobId}`;
+      setText('job-action-hint', !job ? '' : job.status === 'RUNNING' ? 'Running — active cancellation is not supported.'
+        : job.status === 'DONE' && job.result == null ? 'Done; no result text was recorded.' : '');
+      refreshMutationButtons();
+    }
+    async function refreshSelectedJob() {
+      const id = selectedJobId;
+      if (!id || sessionExpired || navigator.onLine === false) return;
+      selectedJobError = '';
+      const promise = getJobRecord(id);
+      renderJobDetail();
+      try {
+        const job = await promise;
+        if (selectedJobId === id) {
+          selectedJob = job;
+          selectedJobSync = Date.now();
+          setIssue('job-detail', null);
+        }
+      } catch (error) {
+        if (selectedJobId === id) {
+          selectedJobError = `${error.message}${selectedJob ? ' Last known job details are kept below.' : ''}`;
+          setIssue('job-detail', error);
+        }
+      } finally {
+        renderJobDetail();
+        renderJobsRows();
+      }
+    }
+    function selectJob(id, focus = false, route = true) {
+      if (selectedJobId !== id) {
+        selectedJobId = id;
+        selectedJob = jobCache.get(id) || jobsPage?.items.find(j => j.id === id) || null;
+        selectedJobSync = 0;
+        selectedJobError = '';
+        setIssue('job-detail', null);
+        for (const section of ['job-prompt-section', 'job-result-section', 'job-error-section']) $(section).open = true;
+      }
+      if (activeTab !== 'jobs') switchTab('jobs', false);
+      if (route) updateTabRoute();
+      renderJobsRows();
+      renderJobDetail();
+      refreshSelectedJob();
+      if (focus) $('job-detail-title').focus();
+    }
+    function closeJobDetail(route = true) {
+      selectedJobId = null;
+      selectedJob = null;
+      selectedJobError = '';
+      setIssue('job-detail', null);
+      renderJobsRows();
+      renderJobDetail();
+      if (route) updateTabRoute();
+    }
+    async function changeJob(action) {
+      const job = selectedJob;
+      if (!job || pendingMutations.has(`job:${job.id}`)) return;
+      if (action === 'cancel' && job.status !== 'QUEUED') return;
+      if (action === 'retry' && !['FAILED', 'CANCELLED'].includes(job.status)) return;
+      const question = action === 'cancel'
+        ? `Cancel this queued job for ${job.hen_id}? It will not run. If it has already started, cancellation will be refused.`
+        : `Retry this prompt as a new job for ${job.hen_id}? The original stays in history. Any work already done may be repeated.`;
+      if (!confirm(question)) return;
+      await mutate(`job:${job.id}`, async () => {
+        const data = await requestJSON(`/api/v1/jobs/${encodeURIComponent(job.id)}/${action}`, {
+          method: 'POST', validate: action === 'cancel' ? data => validJob(data) && data.id === job.id : validJobReceipt,
+        });
+        if (action === 'cancel') {
+          rememberJob(data, true);
+          showToast('Queued job cancelled');
+        } else {
+          pendingJobIds.add(data.job_id);
+          selectJob(data.job_id, true);
+          showToast('Retry accepted as a new job');
+        }
+      });
+      await Promise.all([refreshJobs(true), refreshSelectedJob()]);
+      scheduleSync();
+    }
+    $('jobs-filters').onsubmit = event => {
+      event.preventDefault();
+      const q = $('jobs-search').value.trim();
+      if (new TextEncoder().encode(q).length > 256) {
+        jobsError = 'Search must be at most 256 UTF-8 bytes. Shorten the search; the loaded page has not changed.';
+        renderJobsStatus();
+        $('jobs-search').focus();
+        return;
+      }
+      jobsQuery = { q, status: $('jobs-status').value, hen: $('jobs-hen').value, offset: 0 };
+      refreshJobs(true);
+    };
+    $('jobs-clear').onclick = () => {
+      $('jobs-search').value = '';
+      $('jobs-status').value = '';
+      $('jobs-hen').value = '';
+      jobsQuery = { q: '', status: '', hen: '', offset: 0 };
+      refreshJobs(true);
+    };
+    $('jobs-prev').onclick = () => { jobsQuery.offset = Math.max(0, jobsQuery.offset - JOB_PAGE_SIZE); refreshJobs(true); };
+    $('jobs-next').onclick = () => { if (jobsPage?.hasNext) { jobsQuery.offset += JOB_PAGE_SIZE; refreshJobs(true); } };
+    $('jobs-refresh').onclick = () => { refreshJobs(true); refreshSelectedJob(); };
+    $('job-reload').onclick = refreshSelectedJob;
+    $('job-close').onclick = () => { closeJobDetail(); $('jobs-refresh').focus(); };
+    $('job-retry').onclick = () => changeJob('retry');
+    $('job-cancel').onclick = () => changeJob('cancel');
+    $('job-copy-link').onclick = () => {
+      const url = new URL(location.href);
+      url.hash = 'job=' + encodeURIComponent(selectedJobId);
+      copyText(url.href, 'Job link');
+    };
+    for (const field of ['prompt', 'result', 'error']) {
+      $(`job-copy-${field}`).onclick = () => selectedJob && copyText(selectedJob[field] ?? '', `Job ${field}`);
     }
 
     function ensureScenery() {
@@ -2214,18 +3025,27 @@
     }
 
     let lastFrame = 0;
+    let animationFrame = null;
+    function startAnimation() {
+      if (animationFrame == null && activeTab === 'agents' && !document.hidden && !reducedMotion.matches) {
+        animationFrame = requestAnimationFrame(tickAll);
+      }
+    }
     function tickAll(ts) {
+      animationFrame = null;
+      if (document.hidden || activeTab !== 'agents' || reducedMotion.matches) { lastFrame = 0; return; }
       const dt = lastFrame ? Math.min(0.1, (ts - lastFrame) / 1000) : 0;
       lastFrame = ts;
       const now = ts;
       for (const id in sprites) tickSprite(sprites[id], dt, now);
       tickButterflies(now);
-      requestAnimationFrame(tickAll);
+      startAnimation();
     }
-    requestAnimationFrame(tickAll);
+    reducedMotion.addEventListener('change', startAnimation);
 
     // === Particle system ===
     function emitParticle(x, y, klass, text, opts = {}) {
+      if (reducedMotion.matches || activeTab !== 'agents' || document.hidden) return;
       const grid = $('yard-grid');
       if (!grid) return;
       const p = document.createElement('div');
@@ -2298,7 +3118,7 @@
       ensureScenery();
       measureStage();
       if (!chickens.length) {
-        empty.hidden = false;
+        empty.hidden = !hensLoaded;
         for (const id in sprites) { sprites[id].el.remove(); delete sprites[id]; }
         return;
       }
@@ -2322,6 +3142,7 @@
             behavior: null, until: 0, target: null,
             henState: stateLower,
           };
+          s.el.style.transform = `translate3d(${s.x}px, ${s.y}px, 0)`;
           chooseNextBehavior(s, performance.now());
         } else {
           s.el.title = `${c.id} · ${c.state}`;
@@ -2330,7 +3151,7 @@
           // Replace the body via outerHTML so the SVG sprite re-renders cleanly
           // when sex/state changes (textContent= would erase the SVG).
           const prevBody = s.el.querySelector('.body');
-          const newBodyKey = `${(c.manifest && c.manifest.sex) || 'hen'}|${stateLower === 'defined' || stateLower === 'hatching' ? 'egg' : 'chk'}`;
+          const newBodyKey = `${c.manifest?.sex === 'rooster' ? 'rooster' : 'hen'}|${stateLower === 'defined' || stateLower === 'hatching' ? 'egg' : 'chk'}`;
           if (prevBody && prevBody.dataset.bodyKey !== newBodyKey) {
             const tmp = document.createElement('template');
             tmp.innerHTML = chickenSvg(c);
@@ -2407,7 +3228,10 @@
       $('dc-xp').textContent    = `${stats.xp || 0} / lvl ${stats.level || 0}`;
       $('dc-grain').textContent = `${stats.grain_earned || 0} 🪙`;
       $('dc-created').textContent = (c.created_at || '').replace('T', ' ').replace(/\..*$/, ' UTC');
+      for (const id of ['dc-sleep', 'dc-wake', 'dc-delete']) $(id).dataset.mutationKey = `hen:${c.id}`;
+      setText('dc-wake', c.state === 'DEFINED' ? '🐣 Hatch' : '🌅 Wake');
       renderLoginPanel(c.id, kind, c.manifest.brain.provider_id);
+      refreshMutationButtons();
     }
 
     // ===== Per-hen login / auth helpers =====
@@ -2421,6 +3245,9 @@
       const wrap   = $('dc-login');
       const row    = $('dc-login-actions');
       const vrow   = $('dc-vault-row');
+      const key = JSON.stringify([henId, kind, providerId]);
+      if (wrap.dataset.panelKey === key) return;
+      wrap.dataset.panelKey = key;
       row.innerHTML = '';
       vrow.hidden = true;
       const sessionHints = {
@@ -2433,22 +3260,19 @@
         for (const h of sessionHints[kind]) {
           const b = document.createElement('button');
           b.textContent = h.label;
-          b.onclick = async () => {
-            await fetch(`${API}/api/v1/hens/${encodeURIComponent(henId)}/shell/send`, {
-              method: 'POST',
-              headers: {'content-type':'application/json'},
-              body: JSON.stringify({keys: h.keys}),
-            }).catch(()=>{});
-            // For claude /login, second send-keys after a short delay.
-            if (h.then) setTimeout(() => {
-              fetch(`${API}/api/v1/hens/${encodeURIComponent(henId)}/shell/send`, {
-                method: 'POST',
-                headers: {'content-type':'application/json'},
-                body: JSON.stringify({keys: h.then}),
-              }).catch(()=>{});
-            }, 700);
+          b.dataset.mutationKey = `login:${henId}`;
+          b.onclick = () => mutate(`login:${henId}`, async () => {
+            await requestJSON(`/api/v1/hens/${encodeURIComponent(henId)}/shell/send`, {
+              method: 'POST', body: { keys: h.keys }, validate: validOk,
+            });
+            if (h.then) {
+              await new Promise(resolve => setTimeout(resolve, 700));
+              await requestJSON(`/api/v1/hens/${encodeURIComponent(henId)}/shell/send`, {
+                method: 'POST', body: { keys: h.then }, validate: validOk,
+              });
+            }
             switchTab('sessions'); attachTmuxTab(henId);
-          };
+          });
           row.appendChild(b);
         }
         // Always-available "jump to session" button.
@@ -2467,20 +3291,17 @@
         row.appendChild(label);
         vrow.hidden = false;
         $('dc-vault-key').value = '';
-        $('dc-vault-save').onclick = async () => {
+        $('dc-vault-save').dataset.mutationKey = `vault:${henId}`;
+        $('dc-vault-save').onclick = () => {
           const val = $('dc-vault-key').value.trim();
-          if (!val) return;
-          const r = await fetch(`${API}/api/v1/vault/secrets`, {
-            method: 'PUT',
-            headers: {'content-type':'application/json'},
-            body: JSON.stringify({name: secretName, value: val}),
+          if (!val) { showActionError(new Error('Enter an API key before saving to the vault.')); return; }
+          return mutate(`vault:${henId}`, async () => {
+            await requestJSON('/api/v1/vault/secrets', {
+              method: 'PUT', body: { name: secretName, value: val }, validate: validOk,
+            });
+            if ($('dc-vault-key').value.trim() === val) $('dc-vault-key').value = '';
+            showToast(`🔑 ${secretName} saved`);
           });
-          if (r.ok) {
-            $('dc-vault-key').value = '';
-            toast(`🔑 ${secretName} saved`);
-          } else {
-            toast(`vault put failed: ${r.status}`);
-          }
         };
       } else {
         // shell kind — nothing to log in to
@@ -2496,23 +3317,29 @@
 
     $('dc-shell').onclick = () => activeId && openShell(activeId);
     $('dc-chat').onclick  = () => activeId && openCmdBar(activeId);
-    $('dc-sleep').onclick = async () => activeId &&
-      callAndRefresh(`/api/v1/hens/${encodeURIComponent(activeId)}/sleep`, 'POST');
-    $('dc-wake').onclick  = async () => activeId &&
-      callAndRefresh(`/api/v1/hens/${encodeURIComponent(activeId)}/wake`, 'POST');
-    $('dc-delete').onclick = async () => {
-      if (!activeId) return;
-      if (!confirm(`Cull ${activeId}? This deletes the chicken permanently.`)) return;
-      await fetch(`${API}/api/v1/hens/${encodeURIComponent(activeId)}`, { method: 'DELETE' });
-      $('dc-close').click();
-      fetchAll();
-    };
-    async function callAndRefresh(path, method) {
-      await fetch(API + path, { method }); fetchAll();
+    $('dc-sleep').onclick = () => activeId && henAction(activeId, 'sleep');
+    $('dc-wake').onclick = () => activeId && henAction(activeId, chickens.find(c => c.id === activeId)?.state === 'DEFINED' ? 'hatch' : 'wake');
+    $('dc-delete').onclick = () => activeId && henAction(activeId, 'cull');
+    async function henAction(id, action) {
+      if (pendingMutations.has(`hen:${id}`)) return;
+      if (action === 'cull' && !confirm(`Cull ${id}? This permanently deletes the Hen; recorded jobs remain in history. Running or queued jobs block culling — this does not interrupt work.`)) return;
+      await mutate(`hen:${id}`, async () => {
+        const remove = action === 'cull';
+        await requestJSON(`/api/v1/hens/${encodeURIComponent(id)}${remove ? '' : '/' + action}`, {
+          method: remove ? 'DELETE' : 'POST', empty: remove, validate: remove ? undefined : validOk,
+        });
+        if (remove && activeId === id) $('dc-close').click();
+        showToast(`${id.split('/').pop()}: ${action} succeeded`);
+        await fetchAll();
+      });
     }
 
     // === Shell overlay ===
     function openShell(id) {
+      if (typeof Terminal === 'undefined' || typeof FitAddon === 'undefined') {
+        showActionError(new Error('Terminal assets did not load. Check network/CDN access, then reload the page when unsent input is saved.'));
+        return;
+      }
       if (ws) { try { ws.close(); } catch {} }
       const c = chickens.find(x => x.id === id);
       $('sh-face').textContent = c ? chickenEmoji(c) : '🐔';
@@ -2568,16 +3395,17 @@
     });
 
     // === Live updates ===
-    // Event-sourced diff: WS messages carry typed events. We apply targeted
-    // mutations to in-memory state and only fall back to a full fetch when
-    // we receive a structural change (HenCreated/HenDeleted) or a parse error.
-    let lastFullFetch = 0;
+    // Events identify jobs independently of the currently loaded history page.
+    function scheduleSync() {
+      if (syncTimer || document.hidden || sessionExpired || navigator.onLine === false) return;
+      syncTimer = setTimeout(() => { syncTimer = null; fetchAll(); }, 400);
+    }
     function applyEvent(ev) {
       try {
         const t = ev.type;
         if (t === 'hen_state_changed') {
           const c = chickens.find(x => x.id === ev.id);
-          if (!c) { fetchAll(); return; }
+          if (!c) { scheduleSync(); return; }
           c.state = ev.to;
           renderFlock();
           renderYard();
@@ -2585,63 +3413,95 @@
           showToast(`🐔 ${ev.id.split('/').pop()}: ${ev.from} → ${ev.to}`);
           return;
         }
-        if (t === 'job_status_changed') {
-          // Lightweight: just update savings + status pill; full job table
-          // refresh on the next scheduled tick.
-          if (ev.status === 'completed' || ev.status === 'failed' || ev.status === 'cancelled') {
-            fetchAll();
-          }
+        if (t === 'job_status_changed' || t === 'job_submitted') {
+          if (typeof ev.job_id === 'string') pendingJobIds.add(ev.job_id);
+          scheduleSync();
           return;
         }
-        if (t === 'job_submitted' || t === 'hen_created' || t === 'hen_deleted' || t === 'shutting_down') {
-          fetchAll();
-          return;
-        }
-        // Unknown event type — be safe and resync.
-        fetchAll();
-      } catch (_) {
-        fetchAll();
+        if (t === 'shutting_down') setIssue('farm', new Error('The daemon is shutting down.'));
+        scheduleSync();
+      } catch (error) {
+        setIssue('events', new Error('A live update could not be applied. Refreshing from the daemon.'));
+        scheduleSync();
       }
     }
+    function stopWatch() {
+      clearTimeout(watchTimer);
+      watchTimer = null;
+      const socket = watchSocket;
+      watchSocket = null;
+      if (socket) socket.close();
+    }
     function attachWatch() {
+      if (watchSocket || sessionExpired || navigator.onLine === false || document.hidden) return;
+      clearTimeout(watchTimer);
       const w = new WebSocket(`${WS_PROTO}//${location.host}/api/v1/watch`);
+      watchSocket = w;
+      w.onopen = () => {
+        watchRetryMs = 2000;
+        renderSyncStatus();
+        scheduleSync();
+      };
       w.onmessage = (msg) => {
         try {
           const ev = JSON.parse(msg.data);
+          setIssue('events', null);
           applyEvent(ev);
-        } catch (_) {
-          fetchAll();
+        } catch (error) {
+          setIssue('events', new Error('Invalid live update. Refreshing from the daemon.'));
+          scheduleSync();
         }
       };
-      w.onclose = () => setTimeout(attachWatch, 2000);
+      w.onclose = () => {
+        if (watchSocket !== w) return;
+        watchSocket = null;
+        renderSyncStatus();
+        if (!sessionExpired && navigator.onLine !== false && !document.hidden) {
+          watchTimer = setTimeout(attachWatch, watchRetryMs);
+          watchRetryMs = Math.min(30000, watchRetryMs * 2);
+        }
+      };
+      w.onerror = () => renderSyncStatus();
     }
-    fetchAll(); attachWatch();
-    // Safety-net background sync every 30s (was 4s — WS events now drive UI).
-    setInterval(fetchAll, 30000);
 
     // ==========================================================
-    //  Top-tab nav (Tasks / Sessions / Agents)
+    //  Top-tab nav (Tasks / Jobs / Sessions / Agents)
     // ==========================================================
-    function switchTab(name) {
+    function updateTabRoute() {
+      const hash = activeTab === 'jobs' && selectedJobId ? `job=${encodeURIComponent(selectedJobId)}` : activeTab;
+      if (location.hash !== '#' + hash) history.pushState(null, '', '#' + hash);
+    }
+    function switchTab(name, route = true) {
+      if (!['tasks', 'jobs', 'sessions', 'agents'].includes(name)) return;
       activeTab = name;
       for (const btn of document.querySelectorAll('.topnav .navtab')) {
         btn.classList.toggle('active', btn.dataset.tab === name);
+        btn.setAttribute('aria-pressed', String(btn.dataset.tab === name));
       }
       $('tab-tasks').hidden    = name !== 'tasks';
+      $('tab-jobs').hidden     = name !== 'jobs';
       $('tab-sessions').hidden = name !== 'sessions';
       $('tab-agents').hidden   = name !== 'agents';
       if (name === 'tasks')    refreshTasks();
+      if (name === 'jobs')     { refreshJobs(); if (selectedJobId) refreshSelectedJob(); }
       if (name === 'sessions') { refreshOpenHenSelect(); renderTmuxTabs(); if (activeTmuxHen) { const t = tmuxTabs[activeTmuxHen]; setTimeout(() => { try { t.fit.fit(); } catch(_){} t.term.focus(); }, 50); } }
-      if (name === 'agents')   { measureStage(); renderYard(); }
+      if (name === 'agents')   { measureStage(); renderYard(); startAnimation(); }
+      if (route) updateTabRoute();
+    }
+    function applyTabRoute() {
+      const hash = location.hash.slice(1);
+      if (hash.startsWith('job=')) {
+        const id = new URLSearchParams(hash).get('job');
+        if (id && id.length <= 200) { selectJob(id, false, false); return; }
+      }
+      if (hash === 'jobs') closeJobDetail(false);
+      switchTab(['tasks', 'jobs', 'sessions', 'agents'].includes(hash) ? hash : 'tasks', false);
     }
     for (const btn of document.querySelectorAll('.topnav .navtab')) {
       btn.onclick = () => switchTab(btn.dataset.tab);
     }
-    activeTab = 'tasks';
-    $('tab-tasks').hidden    = false;
-    $('tab-sessions').hidden = true;
-    $('tab-agents').hidden   = true;
-    document.querySelector('.topnav .navtab[data-tab="tasks"]').classList.add('active');
+    window.addEventListener('hashchange', applyTabRoute);
+    window.addEventListener('popstate', applyTabRoute);
 
     // ==========================================================
     //  Console tab — per-hen session stream (tmux when persistent; plain PTY fallback)
@@ -2655,9 +3515,15 @@
       if (!sel) return;
       const open = new Set(Object.keys(tmuxTabs));
       const candidates = chickens.filter(c => !open.has(c.id));
-      sel.innerHTML = candidates.length
+      const previous = sel.value;
+      const options = candidates.length
         ? candidates.map(c => `<option value="${esc(c.id)}">${chickenEmoji(c)} ${esc(c.id.split('/').pop())} · ${esc((c.state||'').toLowerCase())}</option>`).join('')
         : '<option value="">(all hens attached — hatch one in Agents)</option>';
+      if (sel.dataset.options !== options) {
+        sel.innerHTML = options;
+        sel.dataset.options = options;
+        if (candidates.some(c => c.id === previous)) sel.value = previous;
+      }
     }
 
     function renderTmuxTabs() {
@@ -2672,9 +3538,10 @@
         const c = chickens.find(x => x.id === id);
         const emoji = c ? chickenEmoji(c) : '🐔';
         const name  = id.split('/').pop();
+        const disconnected = tmuxTabs[id].ws.readyState >= WebSocket.CLOSING;
         return `<span class="sess ${id === activeTmuxHen ? 'active' : ''}" data-id="${esc(id)}">
-                  ${emoji} <span class="sess-name">${esc(name)}</span>
-                  <span class="x" data-close="${esc(id)}">×</span>
+                  <button data-focus="${esc(id)}" aria-pressed="${id === activeTmuxHen}">${emoji} ${esc(name)}${disconnected ? ' · reconnect' : ''}</button>
+                  <button class="x" data-close="${esc(id)}" aria-label="Detach ${esc(name)}">×</button>
                 </span>`;
       }).join('');
       for (const el of root.querySelectorAll('.sess[data-id]')) {
@@ -2682,7 +3549,7 @@
           if (ev.target.dataset.close) {
             closeTmuxTab(ev.target.dataset.close);
           } else {
-            focusTmuxTab(el.dataset.id);
+            attachTmuxTab(el.dataset.id);
           }
         };
       }
@@ -2708,7 +3575,12 @@
     }
 
     function attachTmuxTab(henId) {
-      if (tmuxTabs[henId]) { focusTmuxTab(henId); return; }
+      if (tmuxTabs[henId] && tmuxTabs[henId].ws.readyState < WebSocket.CLOSING) { focusTmuxTab(henId); return; }
+      if (typeof Terminal === 'undefined' || typeof FitAddon === 'undefined') {
+        showActionError(new Error('Terminal assets did not load. Check network/CDN access, then reload when unsent input is saved.'));
+        return;
+      }
+      if (tmuxTabs[henId]) closeTmuxTab(henId);
       const host = document.createElement('div');
       host.style.width = '100%'; host.style.height = '100%';
       const term = new Terminal({
@@ -2742,7 +3614,12 @@
           } catch (_) {}
         } else term.write(new Uint8Array(ev.data));
       };
-      sws.onclose = () => term && term.writeln('\r\n\x1b[90m[detached — reattach to resume]\x1b[0m');
+      sws.onclose = () => {
+        if (tmuxTabs[henId]?.ws !== sws) return;
+        term.writeln('\r\n\x1b[90m[detached — click this session tab to reconnect]\x1b[0m');
+        renderTmuxTabs();
+        scheduleSync();
+      };
       sws.onerror = () => term && term.writeln('\r\n\x1b[31m[ws error]\x1b[0m');
       term.onData(d => { if (sws.readyState === 1) sws.send(new TextEncoder().encode(d)); });
       term.onResize(({cols, rows}) => {
@@ -2812,9 +3689,6 @@
       } catch (_) {}
     });
 
-    // Stub kept so other code paths that reference renderTasks() are no-ops.
-    function renderTasks() { /* tmux owns its own UI */ }
-
     // Initial paint
     refreshOpenHenSelect();
     renderTmuxTabs();
@@ -2824,6 +3698,7 @@
     //  Game interactions: command bar, context menu, drag, day/night
     // ==========================================================
     let cmdTargetId = null;
+    const cmdDrafts = new Map();
 
     function showToast(msg) {
       const t = $('toast');
@@ -2836,12 +3711,16 @@
     function openCmdBar(id) {
       const c = chickens.find(x => x.id === id);
       if (!c) return;
+      if (cmdTargetId) cmdDrafts.set(cmdTargetId, $('cmd-input').value);
       cmdTargetId = id;
       activeId = id;
       const name = id.split('/').pop();
       const st = (c.state || 'idle').toLowerCase();
       $('cmd-target').innerHTML =
-        `${chickenEmoji(c)} ${esc(name)} <span class="state-tag s-${st}">${st}</span>`;
+        `${chickenEmoji(c)} ${esc(name)} <span class="state-tag s-${esc(st)}">${esc(st)}</span>`;
+      $('cmd-input').value = cmdDrafts.get(id) || '';
+      $('cmd-send').dataset.mutationKey = `job-submit:${id}`;
+      refreshMutationButtons();
       $('cmd-bar').classList.add('open');
       renderChatLog();
       setTimeout(() => $('cmd-input').focus(), 50);
@@ -2850,61 +3729,52 @@
     function refreshCmdTarget() {
       if (!cmdTargetId) return;
       const c = chickens.find(x => x.id === cmdTargetId);
-      if (!c) return;
+      if (!c) {
+        setText('cmd-target', 'Selected Hen is unavailable. Unsent prompt is kept.');
+        $('cmd-send').disabled = true;
+        return;
+      }
       const name = cmdTargetId.split('/').pop();
       const st = (c.state || 'idle').toLowerCase();
       $('cmd-target').innerHTML =
-        `${chickenEmoji(c)} ${esc(name)} <span class="state-tag s-${st}">${st}</span>`;
+        `${chickenEmoji(c)} ${esc(name)} <span class="state-tag s-${esc(st)}">${esc(st)}</span>`;
     }
     function closeCmdBar() {
+      if (cmdTargetId) cmdDrafts.set(cmdTargetId, $('cmd-input').value);
       cmdTargetId = null;
       $('cmd-bar').classList.remove('open');
-      $('cmd-input').value = '';
     }
     async function sendTask(prompt) {
       if (!cmdTargetId || !prompt.trim()) return;
       const id = cmdTargetId;
       const name = id.split('/').pop();
       const text = prompt.trim();
-      pushChat(id, 'user', text);
-      $('cmd-input').value = '';
-      pushChat(id, 'hen', '… working', 'queued');
-      try {
-        const r = await fetch(`${API}/api/v1/hens/${encodeURIComponent(id)}/jobs`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ prompt: text }),
+      const draft = $('cmd-input').value;
+      await mutate(`job-submit:${id}`, async () => {
+        const data = await requestJSON(`/api/v1/hens/${encodeURIComponent(id)}/jobs`, {
+          method: 'POST', body: { prompt: text }, validate: validJobReceipt,
         });
-        // drop the placeholder "… working" we just pushed
-        const arr = chatHistory[id]; if (arr && arr.length) arr.pop();
-        if (r.ok || r.status === 202) {
-          showToast(`📋 Task sent to ${name}`);
-          pushChat(id, 'hen', '… working', 'queued');
-          currentJobs[id] = { prompt: text, status: 'queued' };
-          const s = sprites[id];
-          if (s) {
-            s.el.querySelector('.job-bubble').textContent =
-              text.length > 28 ? text.slice(0,27)+'…' : text;
-            s.el.classList.add('show-job');
-          }
-          setTimeout(fetchAll, 600);
-        } else {
-          const raw = await r.text();
-          let msg = raw || r.statusText;
-          try { const j = JSON.parse(raw); msg = j.error || j.message || raw; } catch (_) {}
-          pushChat(id, 'hen', `⚠️ ${msg}`, 'error');
-          showToast(`⚠️ ${name}: ${msg}`);
+        pushChat(id, 'user', text, null, data.job_id);
+        if (cmdTargetId === id && $('cmd-input').value === draft) {
+          $('cmd-input').value = '';
+          cmdDrafts.delete(id);
+        } else if (cmdDrafts.get(id) === draft) {
+          cmdDrafts.delete(id);
         }
-      } catch (e) {
-        const arr = chatHistory[id]; if (arr && arr.length) arr.pop();
-        pushChat(id, 'hen', `⚠️ Network error: ${e.message}`, 'error');
-        showToast(`⚠️ Network error: ${e.message}`);
-      }
+        if (!seenJobReplies.has(data.job_id)) {
+          pushChat(id, 'hen', 'Queued — open Jobs for durable status and results.', 'queued', data.job_id);
+          trackedJobs.set(data.job_id, { id: data.job_id, hen_id: id, prompt: text, status: 'QUEUED' });
+        }
+        pendingJobIds.add(data.job_id);
+        showToast(`📚 Job accepted for ${name}`);
+        paintJobUpdates();
+        scheduleSync();
+      });
     }
     $('cmd-close').onclick = closeCmdBar;
     $('cmd-send').onclick  = () => sendTask($('cmd-input').value);
     $('cmd-input').addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter') { ev.preventDefault(); sendTask(ev.target.value); }
+      if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); sendTask(ev.target.value); }
       if (ev.key === 'Escape') closeCmdBar();
     });
     $('cmd-chips').addEventListener('click', (ev) => {
@@ -2936,17 +3806,10 @@
       const id = ctxTargetId;
       const act = item.dataset.act;
       closeCtxMenu();
-      const c = chickens.find(x => x.id === id);
       if (act === 'task')    return openCmdBar(id);
       if (act === 'inspect') return select(id);
       if (act === 'shell')   { select(id); $('dc-shell').click(); return; }
-      if (act === 'sleep')   { await fetch(`${API}/api/v1/hens/${encodeURIComponent(id)}/sleep`, {method:'POST'}); return fetchAll(); }
-      if (act === 'wake')    { await fetch(`${API}/api/v1/hens/${encodeURIComponent(id)}/wake`,  {method:'POST'}); return fetchAll(); }
-      if (act === 'cull')    {
-        if (!confirm(`Cull ${id.split('/').pop()}?`)) return;
-        await fetch(`${API}/api/v1/hens/${encodeURIComponent(id)}`, {method:'DELETE'});
-        return fetchAll();
-      }
+      if (act === 'sleep' || act === 'wake' || act === 'cull') return henAction(id, act);
     });
 
     // Day / night toggle -------------------------------------------------
@@ -2960,6 +3823,8 @@
     const modal = $('raise-modal');
     const errBox = $('raise-error');
     let selectedSex = 'hen';
+    let pendingHatch = null;
+    $('btn-submit').dataset.mutationKey = 'raise';
     document.querySelectorAll('.sex-card').forEach(card => {
       card.onclick = () => {
         document.querySelectorAll('.sex-card').forEach(c => c.classList.remove('selected'));
@@ -2968,7 +3833,10 @@
       };
     });
     function openModal() {
+      if (pendingMutations.has('raise')) { modal.classList.add('open'); return; }
       errBox.textContent = '';
+      pendingHatch = null;
+      setText('btn-submit', '🐣 Hatch');
       $('f-name').value = randomChickenName();
       $('f-prompt').value = '';
       selectedSex = 'hen';
@@ -3036,8 +3904,9 @@
     syncAgentFields();
 
     $('btn-submit').onclick = async () => {
+      if (pendingMutations.has('raise')) return;
       const name = $('f-name').value.trim();
-      if (!/^[a-z][a-z0-9-]{0,30}$/.test(name)) {
+      if (!pendingHatch && !/^[a-z][a-z0-9-]{0,30}$/.test(name)) {
         errBox.textContent = 'Name must be lowercase, start with a letter, ≤31 chars, [a-z0-9-].';
         return;
       }
@@ -3055,79 +3924,92 @@
         `sex: ${selectedSex}`,
         `agent_kind: ${agentKind}`,
         `brain:`,
-        `  provider_id: ${agentKind === 'anthropic' ? provider : 'vault:unused'}`,
-        `  model: ${agentKind === 'anthropic' ? model : 'unused'}`,
+        `  provider_id: ${JSON.stringify(agentKind === 'anthropic' ? provider : 'vault:unused')}`,
+        `  model: ${JSON.stringify(agentKind === 'anthropic' ? model : 'unused')}`,
         `tools: [${tools.join(', ')}]`,
       ];
       if (prompt) { lines.push(`personality:`); lines.push(`  system_prompt: ${JSON.stringify(prompt)}`); }
-      errBox.textContent = '…hatching…';
-      try {
-        const r = await fetch(`${API}/api/v1/hens`, {
-          method: 'POST', headers: {'content-type':'application/yaml'},
-          body: lines.join('\n') + '\n',
-        });
-        if (!r.ok) throw new Error(`create failed: ${r.status} ${await r.text()}`);
-        const created = (await r.json()).replace(/^"|"$/g, '');
-        const h = await fetch(`${API}/api/v1/hens/${encodeURIComponent(created)}/hatch`, {method:'POST'});
-        if (!h.ok) throw new Error(`hatch failed: ${h.status} ${await h.text()}`);
+      await mutate('raise', async () => {
+        if (!pendingHatch) {
+          const created = await requestJSON('/api/v1/hens', {
+            method: 'POST', contentType: 'application/yaml', body: lines.join('\n') + '\n',
+            validate: id => typeof id === 'string' && id.length > 0,
+          });
+          pendingHatch = { id: created, agentKind };
+        }
+        const { id: created, agentKind: createdKind } = pendingHatch;
+        setText('btn-submit', 'Retry hatch');
+        try {
+          await requestJSON(`/api/v1/hens/${encodeURIComponent(created)}/hatch`, { method: 'POST', validate: validOk });
+        } catch (error) {
+          scheduleSync();
+          throw new Error(`${created} was created, but hatch was not confirmed. Retry hatch here or inspect it in Agents. ${error.message}`);
+        }
+        pendingHatch = null;
+        setText('btn-submit', '🐣 Hatch');
         closeModal(); fetchAll();
         // Auto-jump to Sessions tab so the user can complete login for the
         // new CLI agent.
-        if (agentKind !== 'anthropic') {
+        if (createdKind !== 'anthropic') {
           setTimeout(() => {
             switchTab('sessions');
             attachTmuxTab(created);
           }, 200);
         }
-      } catch (e) {
-        errBox.textContent = e.message || String(e);
-      }
+      }, 'raise-error');
     };
 
     // ===== Config modal (Farm location + Discord) =====
     const cfgModal = $('config-modal');
     const cfgErr   = $('cfg-error');
+    let cfgDirty = false;
+    let cfgLoadPromise = null;
+    $('btn-cfg-save').dataset.mutationKey = 'config';
+    cfgModal.addEventListener('input', () => { cfgDirty = true; });
 
-    function openCfg()  { cfgModal.classList.add('open'); cfgErr.textContent=''; loadCfg(); }
+    function openCfg()  { cfgModal.classList.add('open'); cfgErr.textContent=''; cfgDirty = false; loadCfg(); }
     function closeCfg() { cfgModal.classList.remove('open'); }
 
     $('btn-config').onclick    = openCfg;
     $('btn-cfg-cancel').onclick = closeCfg;
     cfgModal.addEventListener('click', e => { if (e.target === cfgModal) closeCfg(); });
 
-    async function loadCfg() {
-      // Farm location.
-      try {
-        const loc = await (await fetch(`${API}/api/v1/farm/location`)).json();
-        $('loc-warning').hidden = !loc.loopback_only;
-        const ul = $('loc-list'); ul.innerHTML = '';
-        for (const u of loc.urls) {
-          const li = document.createElement('li');
-          li.className = 'scope-' + u.scope;
-          li.innerHTML = `<span class="lbl">${esc(u.label)}</span>` +
-                         `<span class="url">${esc(u.url)}</span>` +
-                         `<button class="copy">copy</button>`;
-          li.querySelector('.copy').onclick = async () => {
-            try { await navigator.clipboard.writeText(u.url);
-                  const b = li.querySelector('.copy'); b.textContent = '✓'; setTimeout(()=>b.textContent='copy', 1200);
-            } catch {}
-          };
-          ul.appendChild(li);
+    function loadCfg() {
+      if (cfgLoadPromise) return cfgLoadPromise;
+      cfgLoadPromise = (async () => {
+        const results = await Promise.allSettled([
+          requestJSON('/api/v1/farm/location', { validate: loc => Array.isArray(loc?.urls) }),
+          requestJSON('/api/v1/config/discord', { validate: cfg => cfg && typeof cfg.enabled === 'boolean' }),
+        ]);
+        if (results[0].status === 'fulfilled') {
+          const loc = results[0].value;
+          $('loc-warning').hidden = !loc.loopback_only;
+          const ul = $('loc-list'); ul.innerHTML = '';
+          for (const u of loc.urls) {
+            const li = document.createElement('li');
+            li.className = u.scope === 'lan' ? 'scope-lan' : 'scope-local';
+            li.innerHTML = `<span class="lbl">${esc(u.label)}</span>` +
+                           `<span class="url">${esc(u.url)}</span>` +
+                           `<button class="copy">copy</button>`;
+            li.querySelector('.copy').onclick = () => copyText(u.url, 'Farm URL');
+            ul.appendChild(li);
+          }
         }
-      } catch (e) { cfgErr.textContent = 'Failed to load location: ' + e.message; }
-
-      // Discord config.
-      try {
-        const dc = await (await fetch(`${API}/api/v1/config/discord`)).json();
-        $('dc-enabled').checked  = !!dc.enabled;
-        $('dc-token').value      = dc.token || '';
-        $('dc-token').placeholder = dc.token === '***'
-          ? 'stored (leave as *** to keep unchanged)'
-          : 'paste from discord.com/developers';
-        $('dc-guild').value      = dc.guild_id != null ? String(dc.guild_id) : '';
-        $('dc-prefix').value     = dc.prefix || '!coop';
-        $('dc-apibase').value    = dc.api_base || '';
-      } catch (e) { cfgErr.textContent = 'Failed to load discord cfg: ' + e.message; }
+        if (results[1].status === 'fulfilled' && !cfgDirty) {
+          const dc = results[1].value;
+          $('dc-enabled').checked  = !!dc.enabled;
+          $('dc-token').value      = dc.token || '';
+          $('dc-token').placeholder = dc.token === '***'
+            ? 'stored (leave as *** to keep unchanged)'
+            : 'paste from discord.com/developers';
+          $('dc-guild').value      = dc.guild_id != null ? String(dc.guild_id) : '';
+          $('dc-prefix').value     = dc.prefix || '!coop';
+          $('dc-apibase').value    = dc.api_base || '';
+        }
+        const errors = results.filter(r => r.status === 'rejected').map(r => r.reason.message);
+        if (errors.length) cfgErr.textContent = 'Settings could not load: ' + errors.join(' · ');
+      })().catch(error => { cfgErr.textContent = error.message; }).finally(() => { cfgLoadPromise = null; });
+      return cfgLoadPromise;
     }
 
     $('btn-cfg-save').onclick = async () => {
@@ -3148,17 +4030,12 @@
       if (body.enabled && (!body.token || guild_id === null)) {
         cfgErr.textContent = 'Token and Guild ID are required when enabled.'; return;
       }
-      try {
-        const r = await fetch(`${API}/api/v1/config/discord`, {
-          method: 'PUT', headers: {'content-type':'application/json'},
-          body: JSON.stringify(body)
+      await mutate('config', async () => {
+        await requestJSON('/api/v1/config/discord', {
+          method: 'PUT', body, validate: cfg => cfg && typeof cfg.enabled === 'boolean',
         });
-        if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
-        cfgErr.style.color = 'var(--accent-2)';
-        cfgErr.textContent = '✓ saved · bot ' + (body.enabled ? 'restarted' : 'stopped');
-        setTimeout(() => { cfgErr.style.color=''; cfgErr.textContent=''; }, 1800);
-        loadCfg();
-      } catch (e) { cfgErr.textContent = 'Save failed: ' + e.message; }
+        showToast('Settings saved · bot ' + (body.enabled ? 'restarted' : 'stopped'));
+      }, 'cfg-error');
     };
 
     // Esc closes whichever modal is open.
@@ -3169,71 +4046,154 @@
     // ==========================================================
     //  Tasks tab — farm-wide queue
     // ==========================================================
-    async function refreshTasks() {
+    let tasksPromise = null;
+    let tasksAgain = false;
+    let taskItems = null;
+    let lastTasksSync = 0;
+    let tasksError = '';
+    function renderTaskList() {
       const list = $('tasks-list');
-      try {
-        const r = await fetch(`${API}/api/v1/tasks`);
-        const items = await r.json();
-        if (!items.length) {
-          list.innerHTML = '<div class="tasks-empty">No tasks yet. Dispatch one above.</div>';
-          return;
+      if (!taskItems) return;
+      if (!taskItems.length) {
+        const empty = '<div class="tasks-empty">No tasks yet. Dispatch one above.</div>';
+        if (list.innerHTML !== empty) list.innerHTML = empty;
+        return;
+      }
+      const ids = new Set(taskItems.map(t => t.id));
+      for (const row of [...list.children]) if (!ids.has(row.dataset.taskId)) row.remove();
+      taskItems.forEach((t, index) => {
+        let row = [...list.children].find(el => el.dataset.taskId === t.id);
+        if (!row) {
+          row = document.createElement('div');
+          row.className = 'task-item';
+          row.dataset.taskId = t.id;
         }
-        list.innerHTML = items.map(t => {
-          const ts = (t.created_at || '').replace('T',' ').slice(5,16);
+        const signature = JSON.stringify(t);
+        if (row.dataset.signature !== signature) {
+          row.dataset.signature = signature;
+          const ts = formatTime(t.created_at);
           const kind = t.required_agent_kind || 'any';
-          const claimed = t.claimed_by ? t.claimed_by.split('/').pop() : '—';
+          const claimed = t.claimed_by || 'Unclaimed';
           const canDone = t.status === 'PENDING' || t.status === 'DISPATCHED';
           const canCancel = t.status === 'PENDING';
           const actions = [
-            canDone ? `<button data-act="done" data-id="${esc(t.id)}">✓ done</button>` : '',
-            canCancel ? `<button data-act="cancel" data-id="${esc(t.id)}">✕ cancel</button>` : '',
+            canDone ? `<button data-act="done" data-id="${esc(t.id)}" data-mutation-key="task:${esc(t.id)}">Mark done</button>` : '',
+            canCancel ? `<button data-act="cancel" data-id="${esc(t.id)}" data-mutation-key="task:${esc(t.id)}">Cancel</button>` : '',
           ].filter(Boolean).join('');
-          return `<div class="task-item">
+          row.innerHTML = `
             <span class="ts">${esc(ts)}</span>
             <span class="kind">${esc(kind)}</span>
             <span class="prompt" title="${esc(t.prompt)}">${esc(t.prompt)}</span>
             <span class="claimed">${esc(claimed)}</span>
             <span class="stat ${esc(t.status)}">${esc(t.status)}</span>
-            <span class="task-actions">${actions}</span>
-          </div>`;
-        }).join('');
-        list.querySelectorAll('button[data-act]').forEach(b => {
-          b.onclick = async () => {
-            const id = b.dataset.id; const act = b.dataset.act;
-            const url = act === 'done'
-              ? `${API}/api/v1/tasks/${encodeURIComponent(id)}/done`
-              : `${API}/api/v1/tasks/${encodeURIComponent(id)}`;
-            await fetch(url, {method: act === 'done' ? 'POST' : 'DELETE'}).catch(()=>{});
-            refreshTasks();
-          };
-        });
-      } catch (e) {
-        list.innerHTML = `<div class="tasks-empty">Failed to load tasks: ${esc(String(e))}</div>`;
-      }
+            <span class="task-actions">${actions}</span>`;
+          row.querySelectorAll('button[data-act]').forEach(b => {
+            b.onclick = async () => {
+              const id = b.dataset.id;
+              const act = b.dataset.act;
+              if (pendingMutations.has(`task:${id}`)) return;
+              if (!confirm(act === 'cancel' ? 'Cancel this pending task?' : 'Mark this task done? This does not verify output or stop the CLI session.')) return;
+              await mutate(`task:${id}`, async () => {
+                await requestJSON(`/api/v1/tasks/${encodeURIComponent(id)}${act === 'done' ? '/done' : ''}`, {
+                  method: act === 'done' ? 'POST' : 'DELETE', validate: validOk,
+                });
+                showToast(act === 'done' ? 'Task marked done' : 'Pending task cancelled');
+              }, 'task-error');
+              refreshTasks(true);
+            };
+          });
+        }
+        if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null);
+      });
+      refreshMutationButtons();
+    }
+    function renderTasksStatus() {
+      setText('tasks-sync', tasksError ? `Refresh failed: ${tasksError}. ${lastTasksSync ? `Showing tasks from ${formatTime(lastTasksSync)}.` : 'No tasks have loaded yet.'}`
+        : `${tasksPromise ? 'Refreshing… ' : ''}${lastTasksSync ? `Last tasks sync: ${formatTime(lastTasksSync)} · ${taskItems.length} tasks in this daemon.` : 'Loading tasks…'}`);
+      $('tasks-refresh').disabled = !!tasksPromise;
+      $('tasks-list').setAttribute('aria-busy', String(!!tasksPromise));
+    }
+    function refreshTasks(force = false) {
+      if (sessionExpired || navigator.onLine === false) return Promise.resolve();
+      if (tasksPromise) { if (force) tasksAgain = true; return tasksPromise; }
+      tasksError = '';
+      tasksPromise = requestJSON('/api/v1/tasks', {
+        validate: items => Array.isArray(items) && items.every(t => t && typeof t.id === 'string'
+          && typeof t.prompt === 'string' && ['PENDING', 'DISPATCHED', 'DONE', 'CANCELLED'].includes(t.status)),
+      }).then(items => {
+        taskItems = items;
+        lastTasksSync = Date.now();
+        setIssue('tasks', null);
+        renderTaskList();
+      }).catch(error => {
+        tasksError = error.message;
+        setIssue('tasks', error);
+        if (!taskItems) $('tasks-list').innerHTML = '<div class="tasks-empty">Tasks could not be loaded. Use Refresh tasks to try again.</div>';
+      }).finally(() => {
+        tasksPromise = null;
+        renderTasksStatus();
+        if (tasksAgain) { tasksAgain = false; refreshTasks(); }
+      });
+      renderTasksStatus();
+      return tasksPromise;
     }
 
     $('task-submit').onclick = async () => {
-      const prompt = $('task-prompt').value.trim();
+      const draft = $('task-prompt').value;
+      const prompt = draft.trim();
       const kind   = $('task-kind').value || null;
       const err    = $('task-error');
       err.textContent = '';
       if (!prompt) { err.textContent = 'prompt is empty'; return; }
-      try {
-        const r = await fetch(`${API}/api/v1/tasks`, {
-          method: 'POST',
-          headers: {'content-type':'application/json'},
-          body: JSON.stringify({prompt, required_agent_kind: kind}),
+      await mutate('task-submit', async () => {
+        await requestJSON('/api/v1/tasks', {
+          method: 'POST', body: { prompt, required_agent_kind: kind },
+          validate: data => typeof data?.task_id === 'string',
         });
-        if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
-        $('task-prompt').value = '';
-        refreshTasks();
-      } catch (e) { err.textContent = e.message || String(e); }
+        if ($('task-prompt').value === draft) $('task-prompt').value = '';
+        showToast('Task accepted — check its dispatch status below');
+        await refreshTasks(true);
+      }, 'task-error');
     };
     $('task-prompt').addEventListener('keydown', e => {
-      if (e.key === 'Enter') $('task-submit').click();
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); $('task-submit').click(); }
     });
-    // Periodic refresh while Tasks tab is visible.
-    setInterval(() => { if (activeTab === 'tasks') refreshTasks(); }, 4000);
+    $('tasks-refresh').onclick = () => refreshTasks(true);
+
+    function resumeSync() {
+      if (document.hidden) return;
+      sessionExpired = false;
+      refreshMutationButtons();
+      fetchAll();
+      attachWatch();
+      startAnimation();
+    }
+    function startFarm() {
+      applyTabRoute();
+      fetchAll();
+      attachWatch();
+      $('sync-refresh').onclick = resumeSync;
+      window.addEventListener('online', resumeSync);
+      window.addEventListener('offline', () => { stopWatch(); renderSyncStatus(); });
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) stopWatch();
+        else resumeSync();
+      });
+      window.addEventListener('pageshow', resumeSync);
+      window.addEventListener('pagehide', stopWatch);
+      // Every reader coalesces concurrent requests; hidden/offline/expired pages do not poll.
+      setInterval(() => {
+        renderSyncStatus();
+        if (document.hidden || sessionExpired || navigator.onLine === false) return;
+        if (Date.now() - lastFarmAttempt >= 30000) fetchAll();
+        if (activeTab === 'tasks') refreshTasks();
+        if (activeTab === 'jobs') {
+          refreshJobs();
+          if (selectedJobId) refreshSelectedJob();
+        }
+      }, 5000);
+    }
+    startFarm();
   </script>
 </body>
 </html>
