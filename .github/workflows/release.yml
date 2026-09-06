@@ -23,42 +23,47 @@ jobs:
       matrix:
         include:
           # Raspberry Pi 3/4/5 (64-bit Raspberry Pi OS, Ubuntu arm64).
-          # Built natively on GitHub's hosted arm64 runner (no QEMU/cross) —
-          # faster and avoids the stagnant `cross` toolchain for this target.
+          # Native CPU, with a Bookworm container for the glibc baseline.
           - name: linux-aarch64 (Raspberry Pi 64-bit)
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             cross: false
+            linux_baseline: true
             archive: tar.gz
           # Older 32-bit Raspberry Pi OS (Pi Zero 2, legacy Pi 3/4 installs)
           - name: linux-armv7 (Raspberry Pi 32-bit)
             os: ubuntu-latest
             target: armv7-unknown-linux-gnueabihf
             cross: true
+            linux_baseline: false
             archive: tar.gz
           # Generic Linux x86_64 (servers, dev boxes)
           - name: linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             cross: false
+            linux_baseline: true
             archive: tar.gz
           # Windows
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             cross: false
+            linux_baseline: false
             archive: zip
           # macOS Apple Silicon
           - name: macos-aarch64
             os: macos-latest
             target: aarch64-apple-darwin
             cross: false
+            linux_baseline: false
             archive: tar.gz
           # macOS Intel
           - name: macos-x86_64
             os: macos-latest
             target: x86_64-apple-darwin
             cross: false
+            linux_baseline: false
             archive: tar.gz
 
     steps:
@@ -77,11 +82,15 @@ jobs:
         run: cargo install cross --locked --version 0.2.5
 
       - name: Build (cargo)
-        if: ${{ !matrix.cross }}
+        if: ${{ !matrix.cross && !matrix.linux_baseline }}
         shell: bash
         run: |
           cargo build --release --target ${{ matrix.target }} \
             --bin coopd --bin coop
+
+      - name: Build and smoke-test native Linux on Bookworm
+        if: matrix.linux_baseline
+        run: bash ./scripts/build-linux-release.sh "${{ matrix.target }}"
 
       - name: Build (cross, for Raspberry Pi)
         if: matrix.cross
@@ -212,15 +221,12 @@ jobs:
           - debarch: amd64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            cross: false
           - debarch: arm64
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            cross: false
           - debarch: armhf
             os: ubuntu-latest
             target: armv7-unknown-linux-gnueabihf
-            cross: true
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@38ae5351029910ad7674ccfad89c37cbd636f3c4 # 1.91.1
@@ -229,17 +235,32 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: deb-${{ matrix.target }}
-      - name: Install cross
-        if: matrix.cross
-        run: cargo install cross --locked --version 0.2.5
       - name: Install cargo-deb
         run: cargo install cargo-deb --locked
-      - name: Build binaries (cargo)
-        if: ${{ !matrix.cross }}
-        run: cargo build --release --target ${{ matrix.target }} --bin coopd --bin coop
-      - name: Build binaries (cross)
-        if: matrix.cross
-        run: cross build --release --target ${{ matrix.target }} --bin coopd --bin coop
+      - name: Determine version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download the release binaries
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: coop-${{ steps.ver.outputs.tag }}-${{ matrix.target }}
+          path: prebuilt
+      - name: Stage the same binaries for Debian packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="coop-${{ steps.ver.outputs.tag }}-${{ matrix.target }}"
+          ( cd prebuilt && sha256sum -c "$stage.tar.gz.sha256" )
+          tar -xzf "prebuilt/$stage.tar.gz" -C prebuilt
+          mkdir -p "target/${{ matrix.target }}/release"
+          install -m 755 "prebuilt/$stage/coopd" "target/${{ matrix.target }}/release/coopd"
+          install -m 755 "prebuilt/$stage/coop" "target/${{ matrix.target }}/release/coop"
       - name: Package .deb
         run: cargo deb -p coopd --target ${{ matrix.target }} --no-build --no-strip
       - name: Stage .deb
