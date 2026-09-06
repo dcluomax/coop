@@ -66,7 +66,15 @@ base="https://github.com/${REPO}/releases/download/${VERSION}"
 
 # --- Download + verify ------------------------------------------------------
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT INT TERM
+stage=""
+cleanup() {
+  if [ -n "$stage" ]; then
+    install_command rm -f "$stage/coopd" "$stage/coop" || warn "could not clean staged binaries"
+    install_command rmdir "$stage" || warn "could not remove staging directory: $stage"
+  fi
+  rm -rf "$tmp"
+}
+trap cleanup EXIT INT TERM
 say "Downloading $asset"
 $DL_O "$tmp/$asset"        "$base/$asset"        || die "download failed: $base/$asset"
 $DL_O "$tmp/$asset.sha256" "$base/$asset.sha256" || die "checksum download failed: $base/$asset.sha256"
@@ -92,6 +100,7 @@ tar -xzf "$tmp/$asset" -C "$tmp"
 srcdir="$tmp/coop-${VERSION}-${TARGET}"
 [ -d "$srcdir" ] || srcdir="$(find "$tmp" -maxdepth 1 -type d -name 'coop-*' | head -n1)"
 [ -x "$srcdir/coopd" ] || die "coopd binary not found in archive"
+[ -x "$srcdir/coop" ] || die "coop CLI binary not found in archive"
 
 # --- Choose install dir -----------------------------------------------------
 if [ -n "${COOP_INSTALL_DIR:-}" ]; then
@@ -105,20 +114,38 @@ else
 fi
 mkdir -p "$dir" 2>/dev/null || die "cannot create install dir: $dir"
 
-install_bin() {
-  src="$1"; name="$(basename "$1")"
-  if [ -w "$dir" ]; then
-    cp "$src" "$dir/$name" && chmod +x "$dir/$name"
-  elif command -v sudo >/dev/null 2>&1; then
+use_sudo=0
+if [ ! -w "$dir" ]; then
+  if command -v sudo >/dev/null 2>&1; then
     warn "$dir is not writable; using sudo"
-    sudo cp "$src" "$dir/$name" && sudo chmod +x "$dir/$name"
+    use_sudo=1
   else
     die "cannot write to $dir (set COOP_INSTALL_DIR to a writable path)"
   fi
+fi
+install_command() {
+  if [ "$use_sudo" = "1" ]; then
+    sudo "$@"
+  else
+    "$@"
+  fi
 }
 say "Installing coopd + coop to $dir"
-install_bin "$srcdir/coopd"
-install_bin "$srcdir/coop"
+# Stage on the destination filesystem. Rename replaces running Linux binaries
+# without truncating them or failing with ETXTBSY; the old process keeps its inode.
+stage="$(install_command mktemp -d "$dir/.coop-install.XXXXXX")" \
+  || die "cannot stage binaries in $dir"
+install_command cp "$srcdir/coopd" "$stage/coopd" || die "cannot stage coopd"
+install_command cp "$srcdir/coop" "$stage/coop" || die "cannot stage coop"
+install_command chmod 755 "$stage" "$stage/coopd" "$stage/coop" || die "cannot set executable permissions"
+"$stage/coopd" --version >/dev/null \
+  || die "coopd cannot run on this platform; installed binaries left unchanged"
+"$stage/coop" --version >/dev/null \
+  || die "coop CLI cannot run on this platform; installed binaries left unchanged"
+install_command mv -f "$stage/coopd" "$dir/coopd" || die "cannot install coopd"
+install_command mv -f "$stage/coop" "$dir/coop" || die "cannot install coop"
+install_command rmdir "$stage" || die "cannot remove staging directory"
+stage=""
 
 # --- Done -------------------------------------------------------------------
 say "Installed:"
@@ -133,6 +160,9 @@ Next:
   coopd serve &            # start the daemon on http://127.0.0.1:9700
   coop hen list            # talk to it
   open http://127.0.0.1:9700/   # Farm UI
+
+Already running coopd? Let active jobs finish, then restart it to load the upgrade.
+The installer updates binaries only; existing farm data and the running process are unchanged.
 
 Full quickstart: https://github.com/${REPO}/blob/main/docs/quickstart.md
 EOF
