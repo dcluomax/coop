@@ -55,7 +55,17 @@ TARGET="${arch_part}-${os_part}"
 if [ "$VERSION" = "latest" ]; then
   say "Resolving latest release of $REPO..."
   api="https://api.github.com/repos/${REPO}/releases/latest"
-  tag="$($DL "$api" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+  metadata="$($DL "$api")" || die "could not fetch release metadata: $api"
+  tag="$(printf '%s\n' "$metadata" | awk '
+    /"tag_name"[[:space:]]*:/ && !found {
+      value = $0
+      sub(/^.*"tag_name"[[:space:]]*:[[:space:]]*"/, "", value)
+      sub(/".*$/, "", value)
+      tag = value
+      found = 1
+    }
+    END { if (found) print tag }
+  ')"
   [ -n "$tag" ] || die "could not determine the latest release tag (set COOP_VERSION to override)"
   VERSION="$tag"
 fi
