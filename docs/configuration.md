@@ -177,3 +177,126 @@ export COOP_API_TOKEN=…   # same value the daemon was started with
 coop farm
 coop hen list
 ```
+
+Global options work before or after the subcommand:
+
+| Option | Environment | Default | Purpose |
+|--------|-------------|---------|---------|
+| `--api` | `COOP_API` | `http://127.0.0.1:9700` | Daemon base URL, optionally with a reverse-proxy path prefix. |
+| `--token` | `COOP_API_TOKEN` | *(empty)* | API bearer token. Prefer the environment over shell-history/process-list exposure. |
+| `--request-timeout-s` | `COOP_REQUEST_TIMEOUT_S` | `300` | Total deadline per HTTP request, including response body; `1..=86400` seconds. |
+| `--log` | `COOP_LOG` | `warn` | CLI logging filter. |
+
+The base URL must be an absolute `http://` or `https://` URL with no credentials,
+query, or fragment. Trailing slashes are normalized; path prefixes are preserved.
+Use HTTPS when sending a token to a remote daemon. Redirects are never followed,
+including same-host redirects: point `--api` at the final address.
+
+Connections are bounded by the smaller of 10 seconds and the request deadline.
+The default 300-second request budget accommodates the daemon's default
+180-second synchronous delegation wait. If you increase the daemon's
+`COOP_DELEGATE_TIMEOUT_SECS`, also allow sufficient CLI request time:
+
+```sh
+coop --request-timeout-s 900 hen delegate local.coop/aria local.coop/scout "Review the plan"
+```
+
+Changing the CLI timeout does not change the daemon's timeout. Every HTTP command
+exits nonzero on authentication, connection, HTTP-status, or response-decoding
+failure. Errors include the HTTP status and available API error message, including
+plain-text proxy errors. Successful existing command JSON formats are unchanged.
+Local `vault` commands do not contact the daemon.
+
+### Starter providers
+
+`coop hen starter [name]` still defaults to `aria` and Anthropic. Provider
+selection uses the existing built-in brain adapters, not an external CLI agent:
+
+| `--provider` | Default `--provider-id` | Default `--model` | `--base-url` |
+|--------------|-------------------------|-------------------|--------------|
+| `anthropic` | `vault:byok-anthropic` | `claude-sonnet-4-5-20250929` | Not accepted. |
+| `openai` | `vault:byok-openai` | `gpt-4o-mini` | Not accepted. |
+| `openai-compat` | `none` | `llama3.1` | Required; include the endpoint's API prefix, usually `/v1`. |
+
+`--provider-id` and `--model` override these starter defaults; model availability
+depends on your account/server. Only `openai-compat` permits the keyless `none`
+reference. Provider base URLs must also be HTTP(S) URLs without credentials,
+query, or fragment; the manifest's metadata-endpoint restriction still applies.
+The daemon, not the CLI, connects to that provider URL.
+
+Starter preflight validates the manifest and constructs the provider adapter,
+including resolving its key, **before** creating or hatching the Hen. It does not
+send a model request, test account quota, or prove the model server is reachable.
+If hatch fails after creation, the error identifies the created Hen for inspection;
+the CLI does not silently recreate or delete it.
+
+### Job operations and exit status
+
+```sh
+coop job run local.coop/aria "Summarize today's work" --wait --interval-s 2 --timeout-s 600
+coop job wait <job-id> --interval-s 2 --timeout-s 600
+coop job list --hen-id local.coop/aria --status FAILED --order desc --limit 50 --offset 0
+coop job list --q "build error"
+coop job retry <failed-or-cancelled-job-id>
+coop job cancel <queued-job-id>
+```
+
+- `job run` without `--wait` retains the `{"job_id":"…"}` acknowledgement.
+  With `--wait`, stdout contains the final job JSON instead. Polling options on
+  `job run` require `--wait`.
+- `job wait` and `job run --wait` default to a 2-second poll interval and a
+  600-second total deadline. Both options must be greater than zero. The total
+  deadline includes HTTP requests, response bodies, and sleeps; for `run --wait`,
+  it also includes submission. The per-request timeout still applies.
+- `DONE` exits zero. `FAILED` and `CANCELLED` print the complete terminal job JSON
+  before exiting nonzero. A timeout does not cancel server-side work. If submission
+  times out before an acknowledgement arrives, acceptance is unknown: inspect
+  `job list` before resubmitting to avoid duplicate work.
+- `job list` remains a JSON array, oldest first, with no default limit. `--status`
+  accepts `QUEUED`, `RUNNING`, `DONE`, `FAILED`, or `CANCELLED` case-insensitively.
+  `--limit` accepts `1..=500`, `--offset` is a nonnegative count of matching jobs
+  to skip, and `--order asc|desc` selects creation order.
+- `--q` (alias `--search`) searches identifiers, prompt, result, and error
+  case-insensitively. It permits at most **256 UTF-8 bytes after trimming
+  surrounding whitespace**, not 256 Unicode characters.
+- Retry only accepts `FAILED`/`CANCELLED` jobs. It returns a new `{"job_id":"…"}`
+  and preserves the original, copying its Hen, prompt, and delegation depth.
+- Cancel only accepts **QUEUED** jobs and returns the updated job JSON.
+  Already-`CANCELLED` is an idempotent success. `RUNNING`, `DONE`, and `FAILED`
+  return HTTP 409: this command **does not stop an active process**.
+
+Hen lifecycle commands are not cancellation operations either. `hen sleep`,
+`hen wake`, and `hen delete` return HTTP 409 while that Hen has a running job.
+Deletion also refuses a nonempty queue. Inspect `job list --hen-id <hen-id>` and
+wait for running work to finish; cancel queued jobs individually if needed.
+The CLI surfaces these errors and exits nonzero rather than claiming the work
+was interrupted.
+
+### Doctor
+
+`coop doctor` concurrently reads `/api/v1/healthz`, `/api/v1/readyz`,
+`/api/v1/farm`, `/api/v1/vault/status`, and `/api/v1/session/capabilities`.
+It prints a JSON report with each actual response or error, then exits nonzero
+if any probe fails, reports an invalid response, or misses a required capability.
+Readiness checks the daemon's orchestrator, not just its HTTP listener.
+
+The report's `client_version` identifies this CLI build, as does `coop --version`.
+`checks.farm.response.coopd_version` comes from the **running daemon**, not the
+installed daemon binary. Replacing binaries does not update a running process:
+update both binaries, let active jobs finish, then restart the daemon to use new
+server features. Doctor reports versions without assuming compatibility merely
+because its basic probes pass.
+
+```sh
+coop doctor
+coop doctor --require-vault
+coop doctor --require-task-dispatch
+```
+
+A locked local vault is informational by default because Azure and keyless
+providers can work without it; `--require-vault` makes unlocking mandatory.
+A non-persistent shell is likewise reported without claiming external-agent
+task dispatch works; `--require-task-dispatch` requires a persistent,
+dispatch-capable daemon session backend. Failed HTTP probes always cause a
+nonzero exit, even when the associated capability is optional. Doctor does not
+create Hens, mutate the vault, or test model API credentials or model reachability.

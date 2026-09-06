@@ -132,6 +132,7 @@ login`, inspect generated files, or troubleshoot a stuck job.
 | [Configuration](./docs/configuration.md) | Every environment variable |
 | [Network isolation](./docs/net-isolation.md) | Per-hen sandbox + egress policy (`off`/`allowlist`/`open`) |
 | [Memory](./docs/memory.md) | Persistent episodic Hen memory (record · replay · retention · inheritance) |
+| [Jobs and recovery](./docs/jobs.md) | Durable history, search, FIFO queues, explicit retries and queued cancellation |
 | [Delegation](./docs/delegation.md) | In-farm Hen-to-Hen delegation (the `delegate` tool) |
 | [Farmhand (design)](./docs/design/remote-farmhand.md) | Remote monitor & steer the flock from another device (roadmap) |
 | [Discord connector](./docs/discord.md) | One channel per chicken |

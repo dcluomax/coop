@@ -22,6 +22,31 @@ pub enum JobStatus {
     Cancelled,
 }
 
+impl JobStatus {
+    /// Whether this status can no longer execute.
+    #[must_use]
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Done | Self::Failed | Self::Cancelled)
+    }
+}
+
+/// Optional filters for a creation-ordered job history.
+#[derive(Debug, Clone, Default)]
+pub struct JobQuery {
+    /// Restrict the history to one Hen.
+    pub hen_id: Option<HenId>,
+    /// Restrict the history to one lifecycle status.
+    pub status: Option<JobStatus>,
+    /// Case-insensitive text search across identifiers, prompt, result and error.
+    pub search: Option<String>,
+    /// Maximum number of matching jobs; absent preserves the full history.
+    pub limit: Option<usize>,
+    /// Number of matching jobs to skip before collecting results.
+    pub offset: usize,
+    /// Return newest jobs first instead of the legacy oldest-first order.
+    pub descending: bool,
+}
+
 /// A single quest assigned to a Hen.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Job {
@@ -46,6 +71,9 @@ pub struct Job {
     /// Bounds delegation recursion (see `coopd_core::delegation`).
     #[serde(default)]
     pub delegation_depth: u32,
+    /// Original failed or cancelled job when this job is an explicit retry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_of: Option<String>,
     /// Total Grain cost.
     #[serde(default)]
     pub grain_spent: u64,
@@ -70,6 +98,7 @@ impl Job {
             error: None,
             turns: 0,
             delegation_depth: 0,
+            retry_of: None,
             grain_spent: 0,
             created_at: now,
             updated_at: now,
@@ -102,5 +131,38 @@ impl Job {
         self.status = JobStatus::Failed;
         self.error = Some(error);
         self.updated_at = OffsetDateTime::now_utc();
+    }
+
+    /// Mark a queued job as cancelled without executing it.
+    pub fn mark_cancelled(&mut self) {
+        self.status = JobStatus::Cancelled;
+        self.updated_at = OffsetDateTime::now_utc();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_job_records_load_without_retry_metadata() {
+        let job = Job::new(HenId::parse("local.coop/aria").unwrap(), "work".into());
+        let mut value = serde_json::to_value(&job).unwrap();
+        value.as_object_mut().unwrap().remove("retry_of");
+        let loaded: Job = serde_json::from_value(value).unwrap();
+        assert_eq!(loaded.retry_of, None);
+        assert_eq!(loaded.status, JobStatus::Queued);
+    }
+
+    #[test]
+    fn cancelled_job_is_terminal_and_preserves_history() {
+        let mut job = Job::new(HenId::parse("local.coop/aria").unwrap(), "work".into());
+        let created = job.created_at;
+        job.mark_cancelled();
+        assert!(job.status.is_terminal());
+        assert_eq!(job.created_at, created);
+        assert!(job.result.is_none());
+        assert!(!JobStatus::Queued.is_terminal());
+        assert!(!JobStatus::Running.is_terminal());
     }
 }
