@@ -6,6 +6,12 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
 
 ## [Unreleased]
 
+### Fixed
+
+- Latest-release lookup now consumes the complete API response and checks
+  download failure before parsing, avoiding misleading curl broken-pipe errors
+  as release metadata grows.
+
 ## [0.1.0-alpha.4] - 2026-09-06
 
 ### Added
