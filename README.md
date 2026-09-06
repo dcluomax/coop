@@ -110,6 +110,12 @@ state badge and lets you **click a hen to open a real terminal** streamed over
 WebSocket directly into that hen's workdir — drive `claude login` / `gh auth
 login`, inspect generated files, or troubleshoot a stuck job.
 
+The **Jobs** workspace keeps durable prompts, results and failures searchable
+across refreshes and restarts. Filter by Hen/state, copy or deep-link a result,
+retry a failed job, or cancel work that is still queued. **Tasks** remain the
+separate dispatch queue for terminal-hosted CLI agents; dispatch is not proof
+that the external agent finished. See [Jobs and recovery](docs/jobs.md).
+
 <table>
   <tr>
     <td width="50%">
@@ -132,6 +138,7 @@ login`, inspect generated files, or troubleshoot a stuck job.
 | [Configuration](./docs/configuration.md) | Every environment variable |
 | [Network isolation](./docs/net-isolation.md) | Per-hen sandbox + egress policy (`off`/`allowlist`/`open`) |
 | [Memory](./docs/memory.md) | Persistent episodic Hen memory (record · replay · retention · inheritance) |
+| [Jobs and recovery](./docs/jobs.md) | Durable history, search, FIFO queues, explicit retries and queued cancellation |
 | [Delegation](./docs/delegation.md) | In-farm Hen-to-Hen delegation (the `delegate` tool) |
 | [Farmhand (design)](./docs/design/remote-farmhand.md) | Remote monitor & steer the flock from another device (roadmap) |
 | [Discord connector](./docs/discord.md) | One channel per chicken |
