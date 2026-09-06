@@ -15,7 +15,7 @@ members = [
 # per the open-core split. See AGENTS.md for the boundary contract.
 
 [workspace.package]
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 edition = "2024"
 rust-version = "1.91.1"
 license = "Apache-2.0"
@@ -57,12 +57,12 @@ cloned_instead_of_copied = "warn"
 
 [workspace.dependencies]
 # Workspace-internal
-coopd-core = { path = "crates/coopd-core", version = "0.1.0-alpha.3" }
-coopd-storage = { path = "crates/coopd-storage", version = "0.1.0-alpha.3" }
-coopd-vault = { path = "crates/coopd-vault", version = "0.1.0-alpha.3" }
-coopd-tools = { path = "crates/coopd-tools", version = "0.1.0-alpha.3" }
-coopd-brain = { path = "crates/coopd-brain", version = "0.1.0-alpha.3" }
-coopd-discord = { path = "crates/coopd-discord", version = "0.1.0-alpha.3" }
+coopd-core = { path = "crates/coopd-core", version = "0.1.0-alpha.4" }
+coopd-storage = { path = "crates/coopd-storage", version = "0.1.0-alpha.4" }
+coopd-vault = { path = "crates/coopd-vault", version = "0.1.0-alpha.4" }
+coopd-tools = { path = "crates/coopd-tools", version = "0.1.0-alpha.4" }
+coopd-brain = { path = "crates/coopd-brain", version = "0.1.0-alpha.4" }
+coopd-discord = { path = "crates/coopd-discord", version = "0.1.0-alpha.4" }
 # coopd-market is intentionally NOT a workspace member (open-core: proprietary).
 # The public workspace has no dependency or feature hook for the private layer.
 

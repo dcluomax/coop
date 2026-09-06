@@ -8,41 +8,18 @@ use axum::{
     routing::{get, post},
 };
 use coopd_core::{
-    AgentKind, AgentManifest, Delegator, Hen, HenId, HenState, Job, MemoryEntry, Task,
+    AgentKind, AgentManifest, Delegator, Hen, HenId, HenState, Job, JobQuery, JobStatus,
+    MemoryEntry, Task,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
 use crate::discord_supervisor::{DiscordConfig, DiscordSupervisor};
+pub(crate) use crate::execution_policy::enforce_lease_topic;
+use crate::execution_policy::{check_prompt_len, ensure_hatch_supported};
 use crate::location;
 use crate::orchestrator::OrchHandle;
 use crate::tasks::TaskService;
-
-/// Default upper bound on a single prompt's byte length (M3). Bounds memory
-/// per job so a single client cannot exhaust the daemon with one giant request.
-/// Override with `COOP_MAX_PROMPT_BYTES` (0 disables the check).
-const DEFAULT_MAX_PROMPT_BYTES: usize = 256 * 1024;
-
-/// Effective prompt byte cap, read from `COOP_MAX_PROMPT_BYTES` (default
-/// [`DEFAULT_MAX_PROMPT_BYTES`]). A value of `0` disables the limit.
-fn max_prompt_bytes() -> usize {
-    std::env::var("COOP_MAX_PROMPT_BYTES")
-        .ok()
-        .and_then(|s| s.trim().parse::<usize>().ok())
-        .unwrap_or(DEFAULT_MAX_PROMPT_BYTES)
-}
-
-/// Reject prompts larger than the configured cap (M3).
-fn check_prompt_len(prompt: &str) -> Result<(), AppError> {
-    let max = max_prompt_bytes();
-    if max != 0 && prompt.len() > max {
-        return Err(AppError::payload_too_large(format!(
-            "prompt is {} bytes; limit is {max} (set COOP_MAX_PROMPT_BYTES to adjust)",
-            prompt.len()
-        )));
-    }
-    Ok(())
-}
 
 /// Build the HTTP router.
 pub fn router(
@@ -89,6 +66,8 @@ pub fn router(
         .route("/api/v1/hens/:id/shell/send", post(shell_send))
         .route("/api/v1/jobs", get(list_jobs))
         .route("/api/v1/jobs/:id", get(get_job))
+        .route("/api/v1/jobs/:id/cancel", post(cancel_job))
+        .route("/api/v1/jobs/:id/retry", post(retry_job))
         .route("/api/v1/vault/unlock", post(vault_unlock))
         .route("/api/v1/vault/status", get(vault_status))
         .route(
@@ -130,8 +109,14 @@ async fn healthz() -> impl IntoResponse {
     Json(OkBody { ok: true })
 }
 
-async fn readyz(State(_orch): State<OrchHandle>) -> impl IntoResponse {
-    Json(OkBody { ok: true })
+async fn readyz(State(orch): State<OrchHandle>) -> Result<Json<OkBody>, AppError> {
+    match tokio::time::timeout(std::time::Duration::from_secs(2), orch.list_hens(None)).await {
+        Ok(Ok(_)) => Ok(Json(OkBody { ok: true })),
+        _ => Err(AppError {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message: "orchestrator is unavailable".into(),
+        }),
+    }
 }
 
 async fn session_capabilities() -> Json<crate::session::SessionCapabilities> {
@@ -230,34 +215,8 @@ async fn hatch_hen(
     Path(id): Path<String>,
 ) -> Result<Json<OkBody>, AppError> {
     let id = HenId::parse(&id).map_err(|e| AppError::bad_request(e.to_string()))?;
-    // Fail-closed network policy gate: a hen that requests a policy stricter
-    // than `open` must run on a host that can enforce it. We refuse to hatch
-    // rather than silently downgrade to open egress. See docs/net-isolation.md.
     let hen = orch.get_hen(id.clone()).await?;
-    if let Some(net) = &hen.manifest.network
-        && net.policy.requires_enforcement()
-    {
-        if !coopd_tools::sandbox::net_isolation_available() {
-            return Err(AppError::forbidden(format!(
-                "refusing to hatch {id}: network policy `{}` cannot be enforced on this host \
-                     (no user namespaces / Seatbelt). Set network.policy: open to run without \
-                     egress isolation, or run on a supported host.",
-                net.policy.as_str()
-            )));
-        }
-        // tmux-hosted CLI agents are a network egress surface equal to bash
-        // but are not yet wrapped in the per-hen sandbox (v1 limitation).
-        // Fail closed for them under any strict policy.
-        if hen.manifest.agent_kind.is_tmux_agent() {
-            return Err(AppError::forbidden(format!(
-                "refusing to hatch {id}: network policy `{}` is not yet enforceable for \
-                     agent_kind `{}` (tmux CLI agents are an unconfined egress surface in v1). \
-                     Use agent_kind: anthropic, or network.policy: open.",
-                net.policy.as_str(),
-                hen.manifest.agent_kind.as_str()
-            )));
-        }
-    }
+    ensure_hatch_supported(&hen)?;
     orch.transition_hen(id.clone(), HenState::Hatching).await?;
     orch.transition_hen(id, HenState::Idle).await?;
     Ok(Json(OkBody { ok: true }))
@@ -292,14 +251,6 @@ async fn submit_job(
     Json(body): Json<JobBody>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     let id = HenId::parse(&id).map_err(|e| AppError::bad_request(e.to_string()))?;
-    check_prompt_len(&body.prompt)?;
-    // Topic filter: if the hen is currently leased and the manifest defines
-    // a topic_filter, every prompt must pass it before dispatch.
-    if let Ok(hen) = orch.get_hen(id.clone()).await
-        && let Err(reason) = enforce_lease_topic(&hen, &body.prompt)
-    {
-        return Err(AppError::forbidden(reason));
-    }
     let job_id = orch.submit_job(id, body.prompt).await?;
     Ok((
         StatusCode::ACCEPTED,
@@ -361,43 +312,74 @@ fn delegate_api_timeout() -> std::time::Duration {
     std::time::Duration::from_secs(secs)
 }
 
-/// Returns `Err(reason)` if `prompt` violates the active lease policy.
-pub(crate) fn enforce_lease_topic(
-    hen: &coopd_core::Hen,
-    prompt: &str,
-) -> std::result::Result<(), String> {
-    use coopd_core::LeaseStatus;
-    let leased = !matches!(hen.lease, LeaseStatus::Owner);
-    if !leased {
-        return Ok(());
-    }
-    if let Some(tf) = hen
-        .manifest
-        .lease
-        .as_ref()
-        .and_then(|l| l.topic_filter.as_ref())
-    {
-        tf.check(prompt)?;
-    }
-    Ok(())
-}
-
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct ListJobsQ {
     hen_id: Option<String>,
+    status: Option<String>,
+    q: Option<String>,
+    limit: Option<usize>,
+    #[serde(default)]
+    offset: usize,
+    order: Option<String>,
+}
+
+impl ListJobsQ {
+    fn into_query(self) -> Result<JobQuery, AppError> {
+        let hen_id = self
+            .hen_id
+            .as_deref()
+            .map(HenId::parse)
+            .transpose()
+            .map_err(|e| AppError::bad_request(e.to_string()))?;
+        let status = self
+            .status
+            .map(|status| match status.trim().to_ascii_uppercase().as_str() {
+                "QUEUED" => Ok(JobStatus::Queued),
+                "RUNNING" => Ok(JobStatus::Running),
+                "DONE" => Ok(JobStatus::Done),
+                "FAILED" => Ok(JobStatus::Failed),
+                "CANCELLED" => Ok(JobStatus::Cancelled),
+                _ => Err(AppError::bad_request(format!(
+                    "unknown job status: {status}"
+                ))),
+            })
+            .transpose()?;
+        if self.limit.is_some_and(|limit| !(1..=500).contains(&limit)) {
+            return Err(AppError::bad_request("limit must be between 1 and 500"));
+        }
+        let search = self
+            .q
+            .map(|q| q.trim().to_string())
+            .filter(|q| !q.is_empty());
+        if search.as_ref().is_some_and(|q| q.len() > 256) {
+            return Err(AppError::bad_request("q must be at most 256 UTF-8 bytes"));
+        }
+        let descending = match self
+            .order
+            .as_deref()
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            None | Some("asc") => false,
+            Some("desc") => true,
+            _ => return Err(AppError::bad_request("order must be asc or desc")),
+        };
+        Ok(JobQuery {
+            hen_id,
+            status,
+            search,
+            limit: self.limit,
+            offset: self.offset,
+            descending,
+        })
+    }
 }
 
 async fn list_jobs(
     State(orch): State<OrchHandle>,
     Query(q): Query<ListJobsQ>,
 ) -> Result<Json<Vec<Job>>, AppError> {
-    let hen_id = q
-        .hen_id
-        .as_deref()
-        .map(HenId::parse)
-        .transpose()
-        .map_err(|e| AppError::bad_request(e.to_string()))?;
-    Ok(Json(orch.list_jobs(hen_id).await?))
+    Ok(Json(orch.query_jobs(q.into_query()?).await?))
 }
 
 async fn get_job(
@@ -405,6 +387,24 @@ async fn get_job(
     Path(id): Path<String>,
 ) -> Result<Json<Job>, AppError> {
     Ok(Json(orch.get_job(id).await?))
+}
+
+async fn cancel_job(
+    State(orch): State<OrchHandle>,
+    Path(id): Path<String>,
+) -> Result<Json<Job>, AppError> {
+    Ok(Json(orch.cancel_job(id).await?))
+}
+
+async fn retry_job(
+    State(orch): State<OrchHandle>,
+    Path(id): Path<String>,
+) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
+    let job_id = orch.retry_job(id).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "job_id": job_id })),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -649,18 +649,6 @@ impl AppError {
             message: msg.into(),
         }
     }
-    fn forbidden(msg: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::FORBIDDEN,
-            message: msg.into(),
-        }
-    }
-    fn payload_too_large(msg: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::PAYLOAD_TOO_LARGE,
-            message: msg.into(),
-        }
-    }
     fn unprocessable(msg: impl Into<String>) -> Self {
         Self {
             status: StatusCode::UNPROCESSABLE_ENTITY,
@@ -673,10 +661,14 @@ impl From<coopd_core::CoreError> for AppError {
     fn from(e: coopd_core::CoreError) -> Self {
         use coopd_core::CoreError as E;
         let status = match &e {
-            E::HenNotFound(_) => StatusCode::NOT_FOUND,
-            E::InvalidId(_) | E::InvalidManifest(_) | E::InvalidTransition { .. } => {
-                StatusCode::BAD_REQUEST
-            }
+            E::HenNotFound(_) | E::JobNotFound(_) => StatusCode::NOT_FOUND,
+            E::Conflict(_) => StatusCode::CONFLICT,
+            E::PermissionDenied(_) => StatusCode::FORBIDDEN,
+            E::PayloadTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
+            E::InvalidId(_)
+            | E::InvalidManifest(_)
+            | E::InvalidTransition { .. }
+            | E::InvalidInput(_) => StatusCode::BAD_REQUEST,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         Self {
@@ -693,5 +685,143 @@ impl IntoResponse for AppError {
         }
         let body = serde_json::json!({ "error": self.message });
         (self.status, Json(body)).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::{Body, to_bytes};
+    use axum::http::Request;
+    use std::sync::Arc;
+    use tower::ServiceExt;
+
+    #[test]
+    fn job_query_validates_bounds_and_keeps_legacy_defaults() {
+        let legacy = ListJobsQ::default().into_query().unwrap();
+        assert_eq!(legacy.limit, None);
+        assert_eq!(legacy.offset, 0);
+        assert!(!legacy.descending);
+        let query: ListJobsQ = serde_json::from_value(serde_json::json!({
+            "hen_id": "local.coop/aria", "status": "failed", "q": " repair ",
+            "limit": 50, "offset": 100, "order": "desc"
+        }))
+        .unwrap();
+        let query = query.into_query().unwrap();
+        assert_eq!(query.status, Some(JobStatus::Failed));
+        assert_eq!(query.search.as_deref(), Some("repair"));
+        assert!(query.descending);
+        for value in [
+            serde_json::json!({ "limit": 0 }),
+            serde_json::json!({ "limit": 501 }),
+            serde_json::json!({ "status": "complete" }),
+            serde_json::json!({ "order": "random" }),
+            serde_json::json!({ "q": "x".repeat(257) }),
+            serde_json::json!({ "hen_id": "missing-separator" }),
+        ] {
+            let query: ListJobsQ = serde_json::from_value(value).unwrap();
+            assert_eq!(
+                query.into_query().unwrap_err().status,
+                StatusCode::BAD_REQUEST
+            );
+        }
+    }
+
+    async fn request(app: &Router, method: &str, path: &str) -> (StatusCode, serde_json::Value) {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let value = if body.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_slice(&body).unwrap()
+        };
+        (status, value)
+    }
+
+    #[tokio::test]
+    async fn job_routes_preserve_response_shapes_and_report_conflicts() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = coopd_storage::Store::open(dir.path().join("api.redb")).unwrap();
+        let hen_id = HenId::parse("local.coop/aria").unwrap();
+        let mut hen = Hen::new(hen_id.clone(), AgentManifest::minimal("aria".into()));
+        hen.state = HenState::Working;
+        store.put_hen(&hen).unwrap();
+        let mut running = Job::new(hen_id.clone(), "active".into());
+        running.mark_running();
+        let queued = Job::new(hen_id, "queued repair".into());
+        store.put_job(&running).unwrap();
+        store.put_job(&queued).unwrap();
+        let orch = crate::orchestrator::spawn(
+            store.clone(),
+            Arc::new(coopd_tools::Registry::new()),
+            Arc::new(tokio::sync::Mutex::new(
+                crate::brain_factory::BrainFactory::new(None),
+            )),
+            dir.path().join("workdirs"),
+        );
+        let discord =
+            DiscordSupervisor::new(dir.path(), "local.coop", "http://127.0.0.1:9700".into());
+        let app = router(
+            orch.clone(),
+            discord,
+            TaskService::new(orch.clone()),
+            "127.0.0.1:9700".into(),
+        );
+        assert_eq!(
+            request(&app, "GET", "/api/v1/readyz").await.0,
+            StatusCode::OK
+        );
+        let (status, page) = request(
+            &app,
+            "GET",
+            "/api/v1/jobs?status=queued&q=REPAIR&limit=1&order=desc",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(page.as_array().unwrap().len(), 1);
+        assert_eq!(page[0]["id"], queued.id);
+
+        let cancel = format!("/api/v1/jobs/{}/cancel", queued.id);
+        let (status, cancelled) = request(&app, "POST", &cancel).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(cancelled["status"], "CANCELLED");
+        assert_eq!(request(&app, "POST", &cancel).await.1, cancelled);
+        let retry = format!("/api/v1/jobs/{}/retry", queued.id);
+        let (status, result) = request(&app, "POST", &retry).await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let retried = store.get_job(result["job_id"].as_str().unwrap()).unwrap();
+        assert_eq!(retried.retry_of.as_deref(), Some(queued.id.as_str()));
+        assert_eq!(retried.status, JobStatus::Queued);
+
+        for path in [
+            format!("/api/v1/jobs/{}/cancel", running.id),
+            format!("/api/v1/jobs/{}/retry", running.id),
+            "/api/v1/hens/local.coop%2Faria/sleep".into(),
+        ] {
+            assert_eq!(request(&app, "POST", &path).await.0, StatusCode::CONFLICT);
+        }
+        let (status, missing) = request(&app, "GET", "/api/v1/jobs/missing").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(missing["error"].as_str().unwrap().contains("job not found"));
+        assert_eq!(
+            request(&app, "GET", "/api/v1/jobs?limit=0").await.0,
+            StatusCode::BAD_REQUEST,
+        );
+        orch.shutdown().await;
+        assert_eq!(
+            request(&app, "GET", "/api/v1/readyz").await.0,
+            StatusCode::SERVICE_UNAVAILABLE,
+        );
     }
 }

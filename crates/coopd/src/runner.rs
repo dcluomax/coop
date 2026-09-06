@@ -43,15 +43,6 @@ async fn run_job(
     workdir_base: &std::path::Path,
     mut job: Job,
 ) -> Result<()> {
-    use coopd_core::HenState;
-
-    // Mark hen WORKING + job RUNNING.
-    let _ = orch
-        .transition_hen(job.hen_id.clone(), HenState::Working)
-        .await;
-    job.mark_running();
-    orch.update_job(job.clone()).await?;
-
     let outcome: Result<String> = async {
         let hen: Hen = orch.get_hen(job.hen_id.clone()).await?;
         let manifest = hen.manifest.clone();
@@ -70,30 +61,13 @@ async fn run_job(
     match outcome {
         Ok(text) => {
             job.mark_done(text);
-            orch.update_job(job.clone()).await?;
             info!(job_id = %job.id, turns = job.turns, "job done");
         }
         Err(e) => {
             job.mark_failed(e.to_string());
-            orch.update_job(job.clone()).await?;
         }
     }
-
-    // Persist an episodic memory of this job (success or failure) so the hen
-    // continues from context next time. Retention pruning happens in the
-    // orchestrator. Best-effort: memory is an enhancement, never fatal.
-    if let Some(entry) = coopd_core::MemoryEntry::from_job(&job)
-        && let Err(e) = orch.record_memory(entry).await
-    {
-        warn!(job_id = %job.id, error = %e, "failed to record episodic memory");
-    }
-
-    let _ = orch
-        .transition_hen(job.hen_id.clone(), HenState::Idle)
-        .await;
-    // Drain the next queued job for this hen, if any. Best-effort.
-    let _ = orch.dispatch_next_queued(job.hen_id.clone()).await;
-    Ok(())
+    orch.finish_job(job).await
 }
 
 async fn reason_loop(

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use coopd_core::{
     AgentManifest, CoopId, CoreError, DelegationOutcome, DelegationRequest, Delegator, Hen, HenId,
-    HenState, Job, JobStatus, MemoryEntry, OrchCmd, OrchEvent, Result as CoreResult,
+    HenState, Job, JobQuery, JobStatus, MemoryEntry, OrchCmd, OrchEvent, Result as CoreResult,
     validate_delegation,
 };
 use coopd_storage::Store;
@@ -122,19 +122,42 @@ impl OrchHandle {
             .map_err(|_| CoreError::Other("orchestrator dropped reply".into()))?
     }
 
-    /// Update a Job (runner internal).
-    pub async fn update_job(&self, job: Job) -> CoreResult<()> {
+    /// Search and page through job history.
+    pub async fn query_jobs(&self, query: JobQuery) -> CoreResult<Vec<Job>> {
         let (tx, rx) = oneshot::channel();
-        self.send(OrchCmd::UpdateJob { job, reply: tx }).await?;
+        self.send(OrchCmd::QueryJobs { query, reply: tx }).await?;
         rx.await
             .map_err(|_| CoreError::Other("orchestrator dropped reply".into()))?
     }
 
-    /// Record an episodic memory for a Hen.
-    pub async fn record_memory(&self, entry: MemoryEntry) -> CoreResult<()> {
+    /// Cancel a job that has not started executing.
+    pub async fn cancel_job(&self, id: String) -> CoreResult<Job> {
         let (tx, rx) = oneshot::channel();
-        self.send(OrchCmd::RecordMemory { entry, reply: tx })
-            .await?;
+        self.send(OrchCmd::CancelJob { id, reply: tx }).await?;
+        rx.await
+            .map_err(|_| CoreError::Other("orchestrator dropped reply".into()))?
+    }
+
+    /// Submit a new attempt of a failed or cancelled job.
+    pub async fn retry_job(&self, id: String) -> CoreResult<String> {
+        let (tx, rx) = oneshot::channel();
+        self.send(OrchCmd::RetryJob { id, reply: tx }).await?;
+        rx.await
+            .map_err(|_| CoreError::Other("orchestrator dropped reply".into()))?
+    }
+
+    /// Persist a runner's terminal result and advance the Hen's queue.
+    pub async fn finish_job(&self, job: Job) -> CoreResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.send(OrchCmd::FinishJob { job, reply: tx }).await?;
+        rx.await
+            .map_err(|_| CoreError::Other("orchestrator dropped reply".into()))?
+    }
+
+    /// Update a Job (runner internal).
+    pub async fn update_job(&self, job: Job) -> CoreResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.send(OrchCmd::UpdateJob { job, reply: tx }).await?;
         rx.await
             .map_err(|_| CoreError::Other("orchestrator dropped reply".into()))?
     }
@@ -160,15 +183,6 @@ impl OrchHandle {
     pub async fn forget_memories(&self, hen_id: HenId) -> CoreResult<usize> {
         let (tx, rx) = oneshot::channel();
         self.send(OrchCmd::ForgetMemories { hen_id, reply: tx })
-            .await?;
-        rx.await
-            .map_err(|_| CoreError::Other("orchestrator dropped reply".into()))?
-    }
-
-    /// Dispatch the oldest Queued job for `hen_id`, if any.
-    pub async fn dispatch_next_queued(&self, hen_id: HenId) -> CoreResult<Option<String>> {
-        let (tx, rx) = oneshot::channel();
-        self.send(OrchCmd::DispatchNextQueued { hen_id, reply: tx })
             .await?;
         rx.await
             .map_err(|_| CoreError::Other("orchestrator dropped reply".into()))?
@@ -323,7 +337,15 @@ async fn run(
                 let _ = reply.send(res);
             }
             OrchCmd::TransitionHen { id, next, reply } => {
-                let res = handle_transition(&store, &id, next, &events);
+                let res = handle_transition(&store, &id, next, &events).and_then(|()| {
+                    if next == HenState::Idle {
+                        handle_dispatch_next(
+                            &store, &id, &events, &self_handle, &tools,
+                            &brain_factory, &workdir_base,
+                        )?;
+                    }
+                    Ok(())
+                });
                 let _ = reply.send(res);
             }
             OrchCmd::DeleteHen { id, reply } => {
@@ -348,11 +370,37 @@ async fn run(
                 let _ = reply.send(res);
             }
             OrchCmd::GetJob { id, reply } => {
-                let res = store.get_job(&id).map_err(map_storage_err);
+                let res = store.get_job(&id).map_err(map_job_storage_err);
                 let _ = reply.send(res);
             }
             OrchCmd::ListJobs { hen_id, reply } => {
                 let res = store.list_jobs(hen_id.as_ref()).map_err(map_storage_err);
+                let _ = reply.send(res);
+            }
+            OrchCmd::QueryJobs { query, reply } => {
+                let res = store.query_jobs(&query).map_err(map_storage_err);
+                let _ = reply.send(res);
+            }
+            OrchCmd::CancelJob { id, reply } => {
+                let res = handle_cancel_job(&store, &id, &events);
+                let _ = reply.send(res);
+            }
+            OrchCmd::RetryJob { id, reply } => {
+                let res = handle_retry(
+                    &store, &id, &events, &self_handle, &tools,
+                    &brain_factory, &workdir_base,
+                );
+                let _ = reply.send(res);
+            }
+            OrchCmd::FinishJob { job, reply } => {
+                let hen_id = job.hen_id.clone();
+                let res = handle_finish(&store, &job, &events).and_then(|()| {
+                    handle_dispatch_next(
+                        &store, &hen_id, &events, &self_handle, &tools,
+                        &brain_factory, &workdir_base,
+                    )?;
+                    Ok(())
+                });
                 let _ = reply.send(res);
             }
             OrchCmd::UpdateJob { job, reply } => {
@@ -460,6 +508,13 @@ fn map_storage_err(e: coopd_storage::StorageError) -> CoreError {
     }
 }
 
+fn map_job_storage_err(e: coopd_storage::StorageError) -> CoreError {
+    match e {
+        coopd_storage::StorageError::NotFound(s) => CoreError::JobNotFound(s),
+        other => CoreError::Other(other.to_string()),
+    }
+}
+
 fn handle_create(
     store: &Store,
     coop_id: &CoopId,
@@ -520,6 +575,20 @@ fn handle_transition(
     events: &broadcast::Sender<OrchEvent>,
 ) -> CoreResult<()> {
     let mut hen = store.get_hen(id).map_err(map_storage_err)?;
+    if !store
+        .query_jobs(&JobQuery {
+            hen_id: Some(id.clone()),
+            status: Some(JobStatus::Running),
+            limit: Some(1),
+            ..JobQuery::default()
+        })
+        .map_err(map_storage_err)?
+        .is_empty()
+    {
+        return Err(CoreError::Conflict(
+            "a running job owns this Hen; wait for it to finish before changing its state".into(),
+        ));
+    }
     let from = hen.state;
     hen.transition(next)?;
     store.put_hen(&hen).map_err(map_storage_err)?;
@@ -578,6 +647,18 @@ fn handle_delete(
     id: &HenId,
     events: &broadcast::Sender<OrchEvent>,
 ) -> CoreResult<()> {
+    store.get_hen(id).map_err(map_storage_err)?;
+    if store
+        .list_jobs(Some(id))
+        .map_err(map_storage_err)?
+        .iter()
+        .any(|job| !job.status.is_terminal())
+    {
+        return Err(CoreError::Conflict(
+            "Hen has unfinished jobs; cancel queued jobs and wait for running work before deleting it"
+                .into(),
+        ));
+    }
     let removed = store.delete_hen(id).map_err(map_storage_err)?;
     if !removed {
         warn!(%id, "delete: hen not found");
@@ -610,6 +691,7 @@ fn handle_submit(
         hen_id,
         prompt,
         0,
+        None,
         events,
         handle,
         tools,
@@ -619,7 +701,7 @@ fn handle_submit(
 }
 
 /// Rehydrate `hen_id` if needed, persist a Queued job at `depth`, emit
-/// `JobSubmitted`, and spawn the runner immediately if the hen is Idle.
+/// `JobSubmitted`, and atomically claim the oldest job if the hen is Idle.
 /// Shared by farmer submission (depth 0) and delegation (depth +1).
 #[allow(clippy::too_many_arguments)]
 fn enqueue_job(
@@ -627,6 +709,7 @@ fn enqueue_job(
     hen_id: HenId,
     prompt: String,
     depth: u32,
+    retry_of: Option<String>,
     events: &broadcast::Sender<OrchEvent>,
     handle: &OrchHandle,
     tools: &Arc<Registry>,
@@ -634,6 +717,7 @@ fn enqueue_job(
     workdir_base: &std::path::Path,
 ) -> CoreResult<String> {
     let hen = store.get_hen(&hen_id).map_err(map_storage_err)?;
+    crate::execution_policy::check_job(&hen, &prompt)?;
     // Auto-rehydrate hens on job submission.
     // Dormant/Sleeping -> Idle (single hop). Defined -> Hatching -> Idle (two hops).
     let hen = match hen.state {
@@ -651,23 +735,25 @@ fn enqueue_job(
     // Persist the job as Queued regardless of state — the runner drains the
     // per-hen queue on completion, so callers can stream prompts even while
     // the hen is Working/Hatching/Leased.
-    let job = Job::new(hen_id.clone(), prompt).at_depth(depth);
+    let mut job = Job::new(hen_id, prompt).at_depth(depth);
+    job.retry_of = retry_of;
     store.put_job(&job).map_err(map_storage_err)?;
     let _ = events.send(OrchEvent::JobSubmitted {
         job_id: job.id.clone(),
-        hen_id,
+        hen_id: job.hen_id.clone(),
     });
-    let job_id = job.id.clone();
     if matches!(hen.state, HenState::Idle) {
-        runner::spawn_job_task(
-            handle.clone(),
-            tools.clone(),
-            brain_factory.clone(),
-            workdir_base.to_path_buf(),
-            job,
-        );
+        handle_dispatch_next(
+            store,
+            &job.hen_id,
+            events,
+            handle,
+            tools,
+            brain_factory,
+            workdir_base,
+        )?;
     }
-    Ok(job_id)
+    Ok(job.id)
 }
 
 /// Create a delegated sub-job: validate (self/cycle/depth), confirm the target
@@ -685,7 +771,9 @@ fn handle_delegate(
     brain_factory: &Arc<Mutex<BrainFactory>>,
     workdir_base: &std::path::Path,
 ) -> CoreResult<String> {
-    let next_depth = parent_depth + 1;
+    let next_depth = parent_depth
+        .checked_add(1)
+        .ok_or_else(|| CoreError::InvalidInput("delegation depth overflow".into()))?;
     // Authoritative re-validation (the tool/API pre-validate for nicer errors).
     validate_delegation(&from, &to, next_depth)?;
     // Confirm the target hen exists before enqueuing.
@@ -695,6 +783,7 @@ fn handle_delegate(
         to.clone(),
         prompt,
         next_depth,
+        None,
         events,
         handle,
         tools,
@@ -713,28 +802,57 @@ fn handle_delegate(
 fn handle_dispatch_next(
     store: &Store,
     hen_id: &HenId,
-    _events: &broadcast::Sender<OrchEvent>,
+    events: &broadcast::Sender<OrchEvent>,
     handle: &OrchHandle,
     tools: &Arc<Registry>,
     brain_factory: &Arc<Mutex<BrainFactory>>,
     workdir_base: &std::path::Path,
 ) -> CoreResult<Option<String>> {
-    use coopd_core::JobStatus;
-    let hen = store.get_hen(hen_id).map_err(map_storage_err)?;
+    let mut hen = store.get_hen(hen_id).map_err(map_storage_err)?;
     if !matches!(hen.state, HenState::Idle) {
         return Ok(None);
     }
-    let mut jobs = store
-        .list_jobs(Some(hen_id))
+    let query = JobQuery {
+        hen_id: Some(hen_id.clone()),
+        status: Some(JobStatus::Running),
+        limit: Some(1),
+        ..JobQuery::default()
+    };
+    if !store
+        .query_jobs(&query)
+        .map_err(map_storage_err)?
+        .is_empty()
+    {
+        return Err(CoreError::Conflict(
+            "Hen already has a running job; refusing concurrent execution".into(),
+        ));
+    }
+    let Some(mut job) = store
+        .query_jobs(&JobQuery {
+            status: Some(JobStatus::Queued),
+            ..query
+        })
         .map_err(map_storage_err)?
         .into_iter()
-        .filter(|j| matches!(j.status, JobStatus::Queued))
-        .collect::<Vec<_>>();
-    if jobs.is_empty() {
+        .next()
+    else {
         return Ok(None);
-    }
-    jobs.sort_by_key(|j| j.created_at);
-    let job = jobs.remove(0);
+    };
+    let from = hen.state;
+    hen.transition(HenState::Working)?;
+    job.mark_running();
+    // Claim before spawning: runner scheduling must not leave an Idle window
+    // in which a second submission can start on the same Hen.
+    store.put_hen_and_job(&hen, &job).map_err(map_storage_err)?;
+    let _ = events.send(OrchEvent::HenStateChanged {
+        id: hen_id.clone(),
+        from,
+        to: HenState::Working,
+    });
+    let _ = events.send(OrchEvent::JobStatusChanged {
+        job_id: job.id.clone(),
+        status: job.status,
+    });
     let job_id = job.id.clone();
     runner::spawn_job_task(
         handle.clone(),
@@ -746,11 +864,275 @@ fn handle_dispatch_next(
     Ok(Some(job_id))
 }
 
+fn handle_cancel_job(
+    store: &Store,
+    id: &str,
+    events: &broadcast::Sender<OrchEvent>,
+) -> CoreResult<Job> {
+    let mut job = store.get_job(id).map_err(map_job_storage_err)?;
+    if job.status == JobStatus::Cancelled {
+        return Ok(job);
+    }
+    if job.status != JobStatus::Queued {
+        return Err(CoreError::Conflict(
+            "only queued jobs can be cancelled; running work is not interrupted".into(),
+        ));
+    }
+    job.mark_cancelled();
+    store.put_job(&job).map_err(map_storage_err)?;
+    let _ = events.send(OrchEvent::JobStatusChanged {
+        job_id: job.id.clone(),
+        status: job.status,
+    });
+    Ok(job)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_retry(
+    store: &Store,
+    id: &str,
+    events: &broadcast::Sender<OrchEvent>,
+    handle: &OrchHandle,
+    tools: &Arc<Registry>,
+    brain_factory: &Arc<Mutex<BrainFactory>>,
+    workdir_base: &std::path::Path,
+) -> CoreResult<String> {
+    let source = store.get_job(id).map_err(map_job_storage_err)?;
+    if !matches!(source.status, JobStatus::Failed | JobStatus::Cancelled) {
+        return Err(CoreError::Conflict(
+            "only failed or cancelled jobs can be retried".into(),
+        ));
+    }
+    enqueue_job(
+        store,
+        source.hen_id,
+        source.prompt,
+        source.delegation_depth,
+        Some(source.id),
+        events,
+        handle,
+        tools,
+        brain_factory,
+        workdir_base,
+    )
+}
+
+fn handle_finish(
+    store: &Store,
+    job: &Job,
+    events: &broadcast::Sender<OrchEvent>,
+) -> CoreResult<()> {
+    let current = store.get_job(&job.id).map_err(map_job_storage_err)?;
+    if current.status != JobStatus::Running
+        || !matches!(job.status, JobStatus::Done | JobStatus::Failed)
+        || current.hen_id != job.hen_id
+    {
+        return Err(CoreError::Conflict(
+            "only the running job can complete and release its Hen".into(),
+        ));
+    }
+    let mut hen = store.get_hen(&job.hen_id).map_err(map_storage_err)?;
+    let from = hen.state;
+    hen.transition(HenState::Idle)?;
+    store.put_hen_and_job(&hen, job).map_err(map_storage_err)?;
+    let _ = events.send(OrchEvent::JobStatusChanged {
+        job_id: job.id.clone(),
+        status: job.status,
+    });
+    let _ = events.send(OrchEvent::HenStateChanged {
+        id: hen.id,
+        from,
+        to: HenState::Idle,
+    });
+    if let Some(entry) = MemoryEntry::from_job(job)
+        && let Err(error) = handle_record_memory(store, &entry, events)
+    {
+        warn!(job_id = %job.id, %error, "failed to record episodic memory");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use coopd_core::{MemoryOutcome, manifest::MemorySpec};
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn back_to_back_submissions_claim_exactly_one_job_before_spawning() {
+        let dir = tempdir().unwrap();
+        let store = Store::open(dir.path().join("state.redb")).unwrap();
+        let coop_id = CoopId::new("local.coop").unwrap();
+        let hen_id = HenId::new(&coop_id, "aria").unwrap();
+        let mut hen = Hen::new(hen_id.clone(), AgentManifest::minimal("aria".to_string()));
+        hen.state = HenState::Idle;
+        store.put_hen(&hen).unwrap();
+        let tools = Arc::new(Registry::new());
+        let factory = Arc::new(Mutex::new(BrainFactory::new(None)));
+        let handle = spawn(
+            store.clone(),
+            tools.clone(),
+            factory.clone(),
+            dir.path().to_path_buf(),
+        );
+
+        let mut ids = Vec::new();
+        for prompt in ["first", "second"] {
+            ids.push(
+                handle_submit(
+                    &store,
+                    hen_id.clone(),
+                    prompt.to_string(),
+                    &handle.events,
+                    &handle,
+                    &tools,
+                    &factory,
+                    dir.path(),
+                )
+                .unwrap(),
+            );
+        }
+
+        assert_eq!(store.get_hen(&hen_id).unwrap().state, HenState::Working);
+        assert_eq!(store.get_job(&ids[0]).unwrap().status, JobStatus::Running);
+        assert_eq!(store.get_job(&ids[1]).unwrap().status, JobStatus::Queued);
+    }
+
+    #[tokio::test]
+    async fn queued_cancellation_and_completion_drain_without_overlapping_runners() {
+        let dir = tempdir().unwrap();
+        let store = Store::open(dir.path().join("queue.redb")).unwrap();
+        let hen_id = HenId::parse("local.coop/aria").unwrap();
+        let mut hen = Hen::new(hen_id.clone(), AgentManifest::minimal("aria".into()));
+        hen.state = HenState::Idle;
+        store.put_hen(&hen).unwrap();
+        let factory = Arc::new(Mutex::new(BrainFactory::new(None)));
+        let hold_factory = factory.lock().await;
+        let orch = spawn(
+            store.clone(),
+            Arc::new(Registry::new()),
+            factory.clone(),
+            dir.path().to_path_buf(),
+        );
+        let submissions =
+            (0..8).map(|index| orch.submit_job(hen_id.clone(), format!("job {index}")));
+        let ids = futures::future::join_all(submissions)
+            .await
+            .into_iter()
+            .collect::<CoreResult<Vec<_>>>()
+            .unwrap();
+        let jobs = store.list_jobs(None).unwrap();
+        assert_eq!(
+            jobs.iter()
+                .filter(|j| j.status == JobStatus::Running)
+                .count(),
+            1
+        );
+        assert_eq!(
+            jobs.iter()
+                .filter(|j| j.status == JobStatus::Queued)
+                .count(),
+            7
+        );
+        assert!(matches!(
+            orch.transition_hen(hen_id.clone(), HenState::Sleeping)
+                .await,
+            Err(CoreError::Conflict(_))
+        ));
+        assert!(matches!(
+            orch.delete_hen(hen_id.clone()).await,
+            Err(CoreError::Conflict(_))
+        ));
+        assert!(matches!(
+            orch.cancel_job(ids[0].clone()).await,
+            Err(CoreError::Conflict(_))
+        ));
+        let cancelled = orch.cancel_job(ids[1].clone()).await.unwrap();
+        assert_eq!(cancelled.status, JobStatus::Cancelled);
+        assert_eq!(
+            orch.cancel_job(ids[1].clone()).await.unwrap().updated_at,
+            cancelled.updated_at
+        );
+
+        drop(hold_factory);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let jobs = orch.list_jobs(None).await.unwrap();
+                if jobs.iter().all(|job| job.status.is_terminal()) {
+                    break;
+                }
+                assert!(
+                    jobs.iter()
+                        .filter(|job| job.status == JobStatus::Running)
+                        .count()
+                        <= 1
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(store.get_hen(&hen_id).unwrap().state, HenState::Idle);
+        assert_eq!(store.get_job(&ids[1]).unwrap().status, JobStatus::Cancelled);
+        assert!(
+            store
+                .list_jobs(None)
+                .unwrap()
+                .iter()
+                .all(|job| { job.id == ids[1] || job.status == JobStatus::Failed })
+        );
+        orch.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn retry_preserves_source_and_delegation_depth_and_checks_current_policy() {
+        let dir = tempdir().unwrap();
+        let store = Store::open(dir.path().join("retry.redb")).unwrap();
+        let hen_id = HenId::parse("local.coop/aria").unwrap();
+        let mut hen = Hen::new(hen_id.clone(), AgentManifest::minimal("aria".into()));
+        hen.state = HenState::Working;
+        store.put_hen(&hen).unwrap();
+        let mut active = Job::new(hen_id.clone(), "active".into());
+        active.mark_running();
+        store.put_job(&active).unwrap();
+        let mut source = Job::new(hen_id.clone(), "retry me".into()).at_depth(2);
+        source.mark_failed("interrupted at restart".into());
+        store.put_job(&source).unwrap();
+        let orch = spawn(
+            store.clone(),
+            Arc::new(Registry::new()),
+            Arc::new(Mutex::new(BrainFactory::new(None))),
+            dir.path().to_path_buf(),
+        );
+
+        let id = orch.retry_job(source.id.clone()).await.unwrap();
+        let retry = orch.get_job(id).await.unwrap();
+        assert_eq!(retry.status, JobStatus::Queued);
+        assert_eq!(retry.retry_of.as_deref(), Some(source.id.as_str()));
+        assert_eq!(retry.delegation_depth, 2);
+        assert_eq!(retry.prompt, source.prompt);
+        assert!(retry.error.is_none());
+        assert_eq!(
+            store.get_job(&source.id).unwrap().updated_at,
+            source.updated_at
+        );
+        assert!(matches!(
+            orch.retry_job(active.id).await,
+            Err(CoreError::Conflict(_))
+        ));
+        assert!(matches!(
+            orch.retry_job("missing".into()).await,
+            Err(CoreError::JobNotFound(_))
+        ));
+        hen.state = HenState::Archived;
+        store.put_hen(&hen).unwrap();
+        assert!(matches!(
+            orch.retry_job(source.id).await,
+            Err(CoreError::Conflict(_))
+        ));
+        assert_eq!(store.list_jobs(None).unwrap().len(), 3);
+        orch.shutdown().await;
+    }
 
     #[test]
     fn expired_memory_is_pruned_before_reads() {

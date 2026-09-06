@@ -2,14 +2,14 @@
 //!
 //! Persistent storage for `coopd` using `redb`.
 //!
-//! v0.1 stores Hens. Later phases add jobs, ledger events, audit log.
+//! Stores Hens, durable jobs and episodic memory.
 
 #![warn(missing_docs)]
 
 use std::path::Path;
 use std::sync::Arc;
 
-use coopd_core::{Hen, HenId, Job, MemoryEntry};
+use coopd_core::{Hen, HenId, Job, JobQuery, MemoryEntry};
 use redb::{Database, ReadableTable, TableDefinition};
 use thiserror::Error;
 
@@ -195,6 +195,25 @@ impl Store {
         Ok(())
     }
 
+    /// Persist a Hen and its job together, so execution state cannot diverge.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if JSON encoding or the shared redb transaction fails.
+    pub fn put_hen_and_job(&self, hen: &Hen, job: &Job) -> Result<()> {
+        let hen_value = serde_json::to_vec(hen)?;
+        let job_value = serde_json::to_vec(job)?;
+        let write = self.db.begin_write()?;
+        {
+            let mut hens = write.open_table(HENS_TABLE)?;
+            let mut jobs = write.open_table(JOBS_TABLE)?;
+            hens.insert(hen.id.as_str(), hen_value.as_slice())?;
+            jobs.insert(job.id.as_str(), job_value.as_slice())?;
+        }
+        write.commit()?;
+        Ok(())
+    }
+
     /// Fetch a job by ID.
     ///
     /// # Errors
@@ -217,18 +236,69 @@ impl Store {
     /// Returns an error if a read transaction cannot be opened or if any
     /// row fails to deserialize.
     pub fn list_jobs(&self, hen_id: Option<&HenId>) -> Result<Vec<Job>> {
+        self.query_jobs(&JobQuery {
+            hen_id: hen_id.cloned(),
+            ..JobQuery::default()
+        })
+    }
+
+    /// Read a filtered history in UUIDv7 creation order, stopping at the limit.
+    ///
+    /// Unlike loading and sorting the entire history, a bounded recent page
+    /// only materializes matching records from the requested end of the table.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading or decoding a visited record fails.
+    pub fn query_jobs(&self, query: &JobQuery) -> Result<Vec<Job>> {
+        if query.limit == Some(0) {
+            return Ok(Vec::new());
+        }
         let read = self.db.begin_read()?;
         let table = read.open_table(JOBS_TABLE)?;
+        let mut entries = table.iter()?;
+        let search = query.search.as_ref().map(|s| s.to_lowercase());
+        let mut skip = query.offset;
         let mut out = Vec::new();
-        for entry in table.iter()? {
+        loop {
+            let entry = if query.descending {
+                entries.next_back()
+            } else {
+                entries.next()
+            };
+            let Some(entry) = entry else { break };
             let (_k, v) = entry?;
             let job: Job = serde_json::from_slice(v.value())?;
-            if let Some(h) = hen_id
+            if let Some(h) = &query.hen_id
                 && &job.hen_id != h
             {
                 continue;
             }
+            if query.status.is_some_and(|status| job.status != status) {
+                continue;
+            }
+            if let Some(search) = &search
+                && ![
+                    Some(job.id.as_str()),
+                    Some(job.hen_id.as_str()),
+                    Some(job.prompt.as_str()),
+                    job.result.as_deref(),
+                    job.error.as_deref(),
+                ]
+                .into_iter()
+                .flatten()
+                .any(|text| text.to_lowercase().contains(search))
+            {
+                continue;
+            }
+            if skip > 0 {
+                skip -= 1;
+                continue;
+            }
             out.push(job);
+            if query.limit.is_some_and(|limit| out.len() >= limit) {
+                break;
+            }
         }
         Ok(out)
     }
@@ -376,6 +446,86 @@ mod tests {
         assert!(store.delete_hen(&id).unwrap());
         assert_eq!(store.list_hens().unwrap().len(), 2);
         assert!(store.get_hen(&id).is_err());
+    }
+
+    #[test]
+    fn job_query_filters_before_paging_and_preserves_legacy_order() {
+        use coopd_core::JobStatus;
+        let dir = tempdir().unwrap();
+        let store = Store::open(dir.path().join("jobs.redb")).unwrap();
+        let aria = make_hen("aria").id;
+        let bolt = make_hen("bolt").id;
+        for (id, hen, status, prompt) in [
+            ("a", &aria, JobStatus::Failed, "First repair"),
+            ("b", &bolt, JobStatus::Failed, "Other repair"),
+            ("c", &aria, JobStatus::Done, "Completed repair"),
+            ("d", &aria, JobStatus::Failed, "Last REPAIR"),
+        ] {
+            let mut job = Job::new(hen.clone(), prompt.into());
+            job.id = id.into();
+            job.status = status;
+            store.put_job(&job).unwrap();
+        }
+        let all = store.list_jobs(None).unwrap();
+        assert_eq!(
+            all.iter().map(|job| job.id.as_str()).collect::<Vec<_>>(),
+            ["a", "b", "c", "d"]
+        );
+        let mut query = JobQuery {
+            hen_id: Some(aria),
+            status: Some(JobStatus::Failed),
+            search: Some("REPAIR".into()),
+            descending: true,
+            limit: Some(1),
+            offset: 1,
+        };
+        let page = store.query_jobs(&query).unwrap();
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].id, "a");
+        query.offset = usize::MAX;
+        assert!(store.query_jobs(&query).unwrap().is_empty());
+        query.offset = 0;
+        query.search = Some("no match".into());
+        assert!(store.query_jobs(&query).unwrap().is_empty());
+    }
+
+    #[test]
+    fn job_search_includes_results_and_errors() {
+        let dir = tempdir().unwrap();
+        let store = Store::open(dir.path().join("search.redb")).unwrap();
+        let mut job = Job::new(make_hen("aria").id, "hello".into());
+        job.mark_failed("Vault is locked".into());
+        store.put_job(&job).unwrap();
+        let query = JobQuery {
+            search: Some("VAULT".into()),
+            ..JobQuery::default()
+        };
+        assert_eq!(store.query_jobs(&query).unwrap().len(), 1);
+        job.mark_done("Vault is now unlocked".into());
+        job.error = None;
+        store.put_job(&job).unwrap();
+        assert_eq!(store.query_jobs(&query).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn hen_and_job_execution_state_persist_together() {
+        use coopd_core::{HenState, JobStatus};
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("atomic.redb");
+        let store = Store::open(&path).unwrap();
+        let mut hen = make_hen("aria");
+        hen.state = HenState::Working;
+        let mut job = Job::new(hen.id.clone(), "work".into());
+        job.mark_running();
+        store.put_hen_and_job(&hen, &job).unwrap();
+        drop(store);
+
+        let reopened = Store::open(&path).unwrap();
+        assert_eq!(reopened.get_hen(&hen.id).unwrap().state, HenState::Working);
+        assert_eq!(
+            reopened.get_job(&job.id).unwrap().status,
+            JobStatus::Running
+        );
     }
 
     fn mem(

@@ -148,6 +148,7 @@ b "[1] cold boot"
 start_coopd
 n=$(j_get "$(curl -fsS "$API/api/v1/farm")" "hen_count")
 [[ "$n" == "0" ]] && g "fresh farm has 0 hens" || { r "expected 0, got $n"; exit 1; }
+curl -fsS "$API/api/v1/readyz" >/dev/null && g "orchestrator is ready"
 
 # 2. vault init + put
 b "[2] vault init + put"
@@ -342,6 +343,32 @@ b "[10] CLI parity"
 lst=$("$ROOT/target/debug/coop" --api "$API" job list)
 echo "$lst" | grep -q "$job_id" && g "coop job list shows $job_id" || { r "job missing"; echo "$lst" >&2; exit 1; }
 
+# Bounded history keeps the array contract and filters before pagination.
+b "[10a] job history filters and actionable CLI errors"
+filtered=$("$ROOT/target/debug/coop" --api "$API" job list \
+  --hen-id local.coop/aria --status "$final" --limit 1 --order desc)
+[[ "$(j_get "$filtered" 0.id)" == "$job_id" ]] \
+  && g "CLI history filters return the expected job" \
+  || { r "unexpected filtered history: $filtered"; exit 1; }
+searched=$(curl -fsS "$API/api/v1/jobs?q=$job_id&limit=1&order=desc")
+[[ "$(j_get "$searched" 0.id)" == "$job_id" ]] \
+  && g "API history search finds the job" \
+  || { r "job search failed: $searched"; exit 1; }
+bad_limit=$(curl -sS -o /dev/null -w '%{http_code}' "$API/api/v1/jobs?limit=0")
+[[ "$bad_limit" == "400" ]] && g "invalid page size rejected" \
+  || { r "expected 400 for invalid page size, got $bad_limit"; exit 1; }
+empty_prompt=$(curl -sS -o /dev/null -w '%{http_code}' \
+  -X POST "$API/api/v1/hens/local.coop%2Faria/jobs" \
+  -H 'content-type: application/json' -d '{"prompt":"  "}')
+[[ "$empty_prompt" == "400" ]] && g "blank job rejected before queueing" \
+  || { r "expected 400 for empty prompt, got $empty_prompt"; exit 1; }
+if "$ROOT/target/debug/coop" --api "$API" job get missing-e2e-job \
+  >"$DATA_DIR/missing-job.out" 2>"$DATA_DIR/missing-job.err"; then
+  r "CLI reported success for a missing job"; exit 1
+fi
+grep -q '404' "$DATA_DIR/missing-job.err" && g "CLI exposes HTTP errors with nonzero exit" \
+  || { r "missing CLI HTTP error"; exit 1; }
+
 # 10b. CLI memory + forget
 b "[10b] CLI memory + forget"
 cli_mem=$("$ROOT/target/debug/coop" --api "$API" hen memory local.coop/aria)
@@ -351,6 +378,33 @@ echo "$cli_forget" | grep -q '"forgotten"' && g "coop hen forget reports count" 
 mem_after=$(curl -fsS "$API/api/v1/hens/local.coop%2Faria/memory")
 mem_after_len=$("$PY" -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$mem_after")
 [[ "$mem_after_len" == "0" ]] && g "memory empty after forget" || { r "expected 0 after forget, got $mem_after_len"; exit 1; }
+
+# Retry is explicit and preserves the original record; never replay live work.
+if [[ "$MODE" == "mock" ]]; then
+  b "[10b.1] explicit retry and failed wait exit"
+  retried=$(curl -fsS -X POST "$API/api/v1/jobs/$job_id/retry")
+  retry_id=$(j_get "$retried" job_id)
+  [[ -n "$retry_id" && "$retry_id" != "$job_id" ]] \
+    || { r "retry did not create a new job: $retried"; exit 1; }
+  retry_body=$(curl -fsS "$API/api/v1/jobs/$retry_id")
+  [[ "$(j_get "$retry_body" retry_of)" == "$job_id" ]] \
+    && g "retry links to the unchanged original job" \
+    || { r "retry provenance missing: $retry_body"; exit 1; }
+  if "$ROOT/target/debug/coop" --api "$API" job wait "$retry_id" \
+    --interval-s 1 --timeout-s 120 >"$DATA_DIR/retry.out" 2>"$DATA_DIR/retry.err"; then
+    r "CLI wait reported success for a failed mock job"; exit 1
+  fi
+  [[ "$(j_get "$(cat "$DATA_DIR/retry.out")" status)" == "FAILED" ]] \
+    && g "CLI wait prints the terminal job and exits nonzero on failure" \
+    || { r "CLI wait did not report failed job"; exit 1; }
+  original=$(curl -fsS "$API/api/v1/jobs/$job_id")
+  [[ "$(j_get "$original" updated_at)" == "$(j_get "$job_body" updated_at)" ]] \
+    || { r "retry mutated the original job"; exit 1; }
+  cancel_failed=$(curl -sS -o /dev/null -w '%{http_code}' \
+    -X POST "$API/api/v1/jobs/$retry_id/cancel")
+  [[ "$cancel_failed" == "409" ]] && g "completed work cannot be cancelled" \
+    || { r "expected 409 for completed cancellation, got $cancel_failed"; exit 1; }
+fi
 
 # 10c. in-farm delegation (manager hen dispatches to a worker hen)
 b "[10c] in-farm delegation"

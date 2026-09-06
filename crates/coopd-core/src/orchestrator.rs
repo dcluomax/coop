@@ -78,6 +78,34 @@ pub enum OrchCmd {
         /// Reply channel.
         reply: oneshot::Sender<Result<Vec<crate::Job>>>,
     },
+    /// Search or page through the durable job history.
+    QueryJobs {
+        /// Filters and ordering.
+        query: crate::JobQuery,
+        /// Reply channel.
+        reply: oneshot::Sender<Result<Vec<crate::Job>>>,
+    },
+    /// Cancel a queued job; running jobs cannot be cancelled.
+    CancelJob {
+        /// Job ID.
+        id: String,
+        /// Reply channel returning the persisted cancellation.
+        reply: oneshot::Sender<Result<crate::Job>>,
+    },
+    /// Retry a failed or cancelled job without modifying the original record.
+    RetryJob {
+        /// Original job ID.
+        id: String,
+        /// Reply channel returning the new job ID.
+        reply: oneshot::Sender<Result<String>>,
+    },
+    /// Complete a running job and release its Hen in a single transaction.
+    FinishJob {
+        /// Terminal result from the runner.
+        job: crate::Job,
+        /// Reply channel.
+        reply: oneshot::Sender<Result<()>>,
+    },
     /// Persist an updated Job (used by runner tasks).
     UpdateJob {
         /// Updated record.
