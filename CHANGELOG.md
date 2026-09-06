@@ -6,6 +6,53 @@ Versioning: [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0 may break.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.4] - 2026-09-06
+
+### Added
+
+- **Durable Jobs workspace** in the Farm UI: search, Hen/state filters,
+  newest-first pages, deep links, prompt/result/error details, copying, explicit
+  retries and confirmed cancellation of queued work. Selection and unsent
+  drafts survive refreshes; failures and stale data remain visible.
+- **Multi-provider starter Hens**: `coop hen starter --provider` supports
+  Anthropic, OpenAI and OpenAI-compatible endpoints with provider-specific
+  defaults and daemon-side preflight before creation.
+- **CLI operations**: `coop doctor`, `job run --wait`, job discovery filters,
+  `job retry` and queued-only `job cancel`. Doctor distinguishes the client
+  version from the running daemon and supports optional vault/session
+  requirements.
+- **Job recovery API**: filtered and bounded history, immutable retry
+  provenance (`retry_of`), explicit queued cancellation, and meaningful
+  orchestrator readiness. Legacy list response shapes and default order remain
+  unchanged. See [Jobs and recovery](docs/jobs.md).
+
+### Fixed
+
+- Per-Hen dispatch now claims the Hen and job in one transaction before
+  spawning a runner, closing a race that could start concurrent jobs on the
+  same Hen. Completion releases the Hen and advances its FIFO queue through
+  the orchestrator; running work cannot be silently slept or deleted.
+- Automatic hatching and retries enforce current prompt, lifecycle, network
+  and lease policies. Missing jobs report job-specific 404 errors.
+- All CLI HTTP operations now check response status, use bounded deadlines,
+  reject credential-bearing or malformed base URLs, disable redirects, and
+  redact tokens in diagnostics. Failed/cancelled waits print their result and
+  exit nonzero instead of reporting success.
+- The installer stages both executables, checks that they can run, and uses
+  same-filesystem renames. Updating a running Linux daemon no longer truncates
+  its executable or fails with `ETXTBSY`; incompatible archives leave installed
+  binaries unchanged.
+- Native 64-bit GNU release binaries now build and execute on the Debian
+  12/glibc 2.36 baseline instead of requiring the newer CI host's libc. Debian
+  packages reuse the exact release binaries rather than rebuilding them.
+
+### Changed
+
+- The Farm UI uses bounded, cookie-authenticated requests, explicit session
+  recovery, mutation guards, responsive layouts and reduced-motion handling.
+  Jobs, terminal sessions and daemon-lifetime CLI dispatch tasks are clearly
+  distinguished; recorded usage replaces estimated monetary savings.
+
 ## [0.1.0-alpha.3] - 2026-09-02
 
 ### Security

@@ -45,6 +45,8 @@ model request or process. Repeating the cancellation of an already cancelled
 job is safe; cancelling running or completed work returns HTTP 409. A Hen with
 running work cannot be put to sleep, woken or deleted. Cancel its remaining
 queued work and wait for active work to finish before deleting the Hen.
+Durable job history remains available after a Hen is deleted; its episodic
+memory is purged. A retry fails if the original Hen ID no longer exists.
 
 ## HTTP API
 
