@@ -81,6 +81,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/coopd-brain/` | OSS | Anthropic adapter |
 | `crates/coop-cli/` | OSS | `coop` CLI binary |
 | `scripts/install.sh` | OSS | `curl \| sh` binary installer (platform-detecting) |
+| `scripts/build-linux-release.sh` | OSS | Native 64-bit GNU builds and runtime smoke on the Debian 12/glibc 2.36 baseline |
 | `scripts/e2e.sh`, `scripts/farm-demo.sh` | OSS | OSS-only demos |
 | `Dockerfile`, `docker-compose.yml`, `.dockerignore` | OSS | Container deploy |
 | `contrib/systemd/coopd.service`, `contrib/coop.env.example` | OSS | systemd deploy |

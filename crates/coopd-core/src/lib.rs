@@ -36,7 +36,7 @@ pub use delegation::{
 pub use error::{CoreError, Result};
 pub use hen::{Hen, HenState, LeaseStatus};
 pub use ids::{CoopId, HenId, RoostId};
-pub use job::{Job, JobStatus};
+pub use job::{Job, JobQuery, JobStatus};
 pub use manifest::{AgentKind, AgentManifest};
 pub use memory::{
     DEFAULT_MEMORY_CONTEXT_ENTRIES, MemoryEntry, MemoryOutcome, render_memory_context,

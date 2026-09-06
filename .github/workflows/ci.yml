@@ -47,12 +47,15 @@ jobs:
         with:
           command: check licenses bans sources advisories
 
-  arm-build:
-    name: arm compile check (${{ matrix.target }})
+  linux-build:
+    name: linux compile check (${{ matrix.target }})
     strategy:
       fail-fast: false
       matrix:
         include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: false
           # Native arm64 runner — same path the release uses for aarch64.
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
@@ -73,9 +76,9 @@ jobs:
       - name: Install cross
         if: matrix.cross
         run: cargo install cross --locked --version 0.2.5
-      - name: compile check (cargo)
+      - name: compile and runtime baseline check (Bookworm)
         if: ${{ !matrix.cross }}
-        run: cargo build --release --target ${{ matrix.target }} --bin coopd --bin coop
+        run: bash ./scripts/build-linux-release.sh "${{ matrix.target }}"
       - name: compile check (cross)
         if: matrix.cross
         run: cross build --release --target ${{ matrix.target }} --bin coopd --bin coop

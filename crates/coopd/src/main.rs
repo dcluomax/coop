@@ -17,6 +17,7 @@ mod api;
 mod auth;
 mod brain_factory;
 mod discord_supervisor;
+mod execution_policy;
 mod location;
 mod orchestrator;
 mod runner;

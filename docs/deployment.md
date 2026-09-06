@@ -31,6 +31,27 @@ The `.deb` installs `coopd`/`coop` to `/usr/bin`, drops the hardened
 `coopd.service` unit (disabled by default — `sudo systemctl enable --now coopd`
 to start), and writes `/etc/coop/coop.env.example`.
 
+Native 64-bit GNU/Linux release binaries are built and run on **Debian 12
+(glibc 2.36)** before publication. Use Debian 12 / Raspberry Pi OS Bookworm or a
+newer compatible distribution. Debian packages reuse the exact release
+executables instead of rebuilding against a newer CI host's libc. For older
+systems, build from source against that system's libraries or use Docker.
+
+## Upgrade an existing farm
+
+Re-run the installer with the same install directory, or install the newer
+`.deb` package. Update **both** `coop` and `coopd` before using new CLI features.
+The installer verifies the release checksum, stages both executables and
+checks that both can run before
+replacing them with same-filesystem renames. A running Linux daemon keeps using
+its previous executable until restarted; its file is never truncated in place.
+
+The installer does not stop the daemon, clear farm data, or replay jobs. Let
+active jobs finish, then restart your existing service (for systemd,
+`sudo systemctl restart coopd`). Compare `coop --version` with the
+`coopd_version` returned by `coop farm` to confirm the client and running daemon
+are on the intended release. Back up your data directory before any upgrade.
+
 ## Docker
 
 ```bash
