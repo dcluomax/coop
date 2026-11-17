@@ -51,7 +51,7 @@ wildcards = "deny"
 
 [advisories]
 yanked = "warn"
-# All four advisories below are in `rustls-webpki 0.102.8`, pulled in
+# All advisories below are in `rustls 0.22.4` and `rustls-webpki 0.102.8`, pulled in
 # transitively from `serenity 0.12.5 → tokio-tungstenite 0.21 → rustls 0.22`.
 # Serenity 0.12.5 is the latest crates.io release and pins these old TLS
 # crates; serenity 0.13 (with rustls 0.23) is not yet published.
@@ -71,6 +71,12 @@ ignore = [
     "RUSTSEC-2026-0098", # rustls-webpki URI name-constraint check
     "RUSTSEC-2026-0099", # rustls-webpki wildcard name-constraint check
     "RUSTSEC-2026-0104", # rustls-webpki panic on malformed CRL
+    "RUSTSEC-2026-0382", # rustls-webpki may accept distrusted intermediates
+    # Added 2026-11-17 for the same serenity chain. rustls 0.22 is built without
+    # the `brotli` feature, Coop never Debug-formats TLS sessions, and the Discord
+    # client already uses the classical X25519 key exchange.
+    "RUSTSEC-2026-0346", # rustls 0.22 (fixed only in 0.23.46)
+    "RUSTSEC-2026-0349", # rustls 0.22 (fixed only in 0.23.46)
 ]
 
 [sources]
