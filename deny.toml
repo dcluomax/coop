@@ -77,6 +77,10 @@ ignore = [
     # client already uses the classical X25519 key exchange.
     "RUSTSEC-2026-0346", # rustls 0.22 (fixed only in 0.23.46)
     "RUSTSEC-2026-0349", # rustls 0.22 (fixed only in 0.23.46)
+    # Not a vulnerability: the crate is unmaintained (archived). It comes from
+    # the deprecated `serde_yaml` 0.9 used by coopd-core, coopd and coop-cli.
+    # Remove this entry when `serde_yaml` is replaced by a maintained crate.
+    "RUSTSEC-2024-0449", # unsafe-libyaml is unmaintained
 ]
 
 [sources]
