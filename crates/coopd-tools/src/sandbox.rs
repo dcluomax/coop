@@ -266,6 +266,10 @@ fn wrapped_command(workdir: &Path, command: &str, net: &ResolvedNetPolicy) -> Co
         cmd.arg("--tmpfs").arg(root);
     }
     cmd.arg("--bind").arg(&canon).arg(&canon);
+    // This remount is nonrecursive, so our own workdir bind stays writable.
+    if let Some(root) = canon.parent() {
+        cmd.arg("--remount-ro").arg(root);
+    }
     cmd.arg("--chdir").arg(&canon);
     cmd.arg("bash").arg("-c").arg(command);
     cmd
@@ -499,6 +503,25 @@ mod tests {
         assert!(
             !out.status.success(),
             "expected non-zero exit on denied write"
+        );
+
+        let sibling = root.path().join("new-sibling");
+        let out = bash_command(
+            &wd,
+            "alice.coop/aria",
+            &format!("mkdir '{}'", sibling.display()),
+            &open_net(),
+        )
+        .output()
+        .await
+        .unwrap();
+        assert!(
+            !sibling.exists(),
+            "created a sibling workdir outside the sandbox"
+        );
+        assert!(
+            !out.status.success(),
+            "expected non-zero exit when creating a sibling workdir"
         );
     }
 
