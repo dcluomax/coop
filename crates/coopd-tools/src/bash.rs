@@ -85,62 +85,67 @@ impl CoopTool for Bash {
         // are isolated from each other and from host secrets.
         let workdir = ctx.workdir.clone();
 
-        let mut cmd =
+        let cmd =
             crate::sandbox::bash_command(&workdir, &ctx.agent_id, &inp.command, &ctx.net_policy);
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            cmd.as_std_mut().process_group(0);
-        }
-        cmd.kill_on_drop(true)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| CoreError::Io(format!("bash spawn: {e}")))?;
-        let process_group_id = child.id();
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| CoreError::Io("bash stdout pipe unavailable".into()))?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| CoreError::Io("bash stderr pipe unavailable".into()))?;
-        let timeout_s = inp.timeout_s.clamp(1, 600);
-        let dur = std::time::Duration::from_secs(timeout_s);
-        let completed = async {
-            let (status, stdout, stderr) =
-                tokio::try_join!(child.wait(), read_capped(stdout), read_capped(stderr))?;
-            Ok::<_, std::io::Error>((status, stdout, stderr))
-        };
-        let out = match tokio::time::timeout(dur, completed).await {
-            Ok(Ok((status, (stdout, stdout_truncated), (stderr, stderr_truncated)))) => Output {
-                stdout: String::from_utf8_lossy(&stdout).into_owned(),
-                stderr: String::from_utf8_lossy(&stderr).into_owned(),
-                exit_code: status.code().unwrap_or(-1),
-                timed_out: false,
-                stdout_truncated,
-                stderr_truncated,
-            },
-            Ok(Err(e)) => {
-                terminate_process_tree(&mut child, process_group_id).await;
-                return Err(CoreError::Io(format!("bash wait: {e}")));
-            }
-            Err(_) => {
-                terminate_process_tree(&mut child, process_group_id).await;
-                Output {
-                    stdout: String::new(),
-                    stderr: format!("timeout after {timeout_s}s"),
-                    exit_code: -1,
-                    timed_out: true,
-                    stdout_truncated: false,
-                    stderr_truncated: false,
-                }
-            }
-        };
+        let out = run_command(cmd, inp.timeout_s).await?;
         Ok(serde_json::to_value(out)?)
     }
+}
+
+async fn run_command(mut cmd: tokio::process::Command, timeout_s: u64) -> Result<Output> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.as_std_mut().process_group(0);
+    }
+    cmd.kill_on_drop(true)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| CoreError::Io(format!("bash spawn: {e}")))?;
+    let process_group_id = child.id();
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| CoreError::Io("bash stdout pipe unavailable".into()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| CoreError::Io("bash stderr pipe unavailable".into()))?;
+    let timeout_s = timeout_s.clamp(1, 600);
+    let dur = std::time::Duration::from_secs(timeout_s);
+    let completed = async {
+        let (status, stdout, stderr) =
+            tokio::try_join!(child.wait(), read_capped(stdout), read_capped(stderr))?;
+        Ok::<_, std::io::Error>((status, stdout, stderr))
+    };
+    let out = match tokio::time::timeout(dur, completed).await {
+        Ok(Ok((status, (stdout, stdout_truncated), (stderr, stderr_truncated)))) => Output {
+            stdout: String::from_utf8_lossy(&stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&stderr).into_owned(),
+            exit_code: status.code().unwrap_or(-1),
+            timed_out: false,
+            stdout_truncated,
+            stderr_truncated,
+        },
+        Ok(Err(e)) => {
+            terminate_process_tree(&mut child, process_group_id).await;
+            return Err(CoreError::Io(format!("bash wait: {e}")));
+        }
+        Err(_) => {
+            terminate_process_tree(&mut child, process_group_id).await;
+            Output {
+                stdout: String::new(),
+                stderr: format!("timeout after {timeout_s}s"),
+                exit_code: -1,
+                timed_out: true,
+                stdout_truncated: false,
+                stderr_truncated: false,
+            }
+        }
+    };
+    Ok(out)
 }
 
 async fn read_capped<R>(reader: R) -> std::io::Result<(Vec<u8>, bool)>
@@ -237,16 +242,18 @@ mod tests {
     #[tokio::test]
     async fn timeout_covers_descendants_holding_output_pipes() {
         let dir = tempdir().unwrap();
-        let ctx = crate::test_ctx(dir.path().to_path_buf());
+        // PID-namespace cleanup can terminate descendants when the shell exits.
+        // Exercise the pipe deadline independently of that cleanup mechanism.
+        let mut cmd = tokio::process::Command::new("bash");
+        cmd.arg("-c")
+            .arg("sleep 30 & echo $! > child.pid")
+            .current_dir(dir.path())
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin");
         let started = std::time::Instant::now();
-        let out = Bash
-            .invoke(
-                &ctx,
-                json!({ "command": "sleep 30 & echo $! > child.pid", "timeout_s": 1 }),
-            )
-            .await
-            .unwrap();
-        assert_eq!(out["timed_out"], true);
+        let out = run_command(cmd, 1).await.unwrap();
+        assert!(out.timed_out);
+        assert_eq!(out.exit_code, -1);
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
         #[cfg(unix)]
         {
@@ -266,5 +273,19 @@ mod tests {
             }
             panic!("background descendant {pid} survived timeout");
         }
+    }
+
+    #[tokio::test]
+    async fn timeout_covers_sandboxed_command() {
+        let dir = tempdir().unwrap();
+        let ctx = crate::test_ctx(dir.path().to_path_buf());
+        let started = std::time::Instant::now();
+        let out = Bash
+            .invoke(&ctx, json!({ "command": "sleep 30", "timeout_s": 1 }))
+            .await
+            .unwrap();
+        assert_eq!(out["timed_out"], true);
+        assert_eq!(out["exit_code"], -1);
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 }
